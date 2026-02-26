@@ -20,6 +20,7 @@ class CaptureService:
         self._on_recording_state = on_recording_state
         self._record_process: subprocess.Popen[str] | None = None
         self._record_output_path: Path | None = None
+        self._record_ffmpeg_path: Path | None = None
         self._record_reader_thread: threading.Thread | None = None
         self._lock = threading.Lock()
 
@@ -129,6 +130,7 @@ class CaptureService:
 
             self._record_process = process
             self._record_output_path = output_path
+            self._record_ffmpeg_path = ffmpeg_path
 
         self._emit_log(f"Grabación iniciada: {output_path}")
         self._emit_recording_state(True)
@@ -144,25 +146,33 @@ class CaptureService:
     def stop_recording(self) -> None:
         process: subprocess.Popen[str] | None
         output_path: Path | None
+        ffmpeg_path: Path | None
 
         with self._lock:
             process = self._record_process
             output_path = self._record_output_path
+            ffmpeg_path = self._record_ffmpeg_path
 
         if process is None or process.poll() is not None:
             return
 
         self._emit_log("Deteniendo grabación...")
 
+        forced_stop = False
         try:
             if process.stdin is not None:
                 process.stdin.write("q\n")
                 process.stdin.flush()
-            process.wait(timeout=10)
+            process.wait(timeout=25)
         except (subprocess.TimeoutExpired, OSError):
+            forced_stop = True
+            self._emit_log(
+                "[ADVERTENCIA] ffmpeg no cerro a tiempo tras solicitar parada. "
+                "Se intentara cierre forzado y reparacion del MP4."
+            )
             process.terminate()
             try:
-                process.wait(timeout=4)
+                process.wait(timeout=8)
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=2)
@@ -172,9 +182,12 @@ class CaptureService:
             if self._record_process is process:
                 self._record_process = None
                 self._record_output_path = None
+                self._record_ffmpeg_path = None
                 should_emit_state = True
 
         if should_emit_state:
+            if forced_stop and output_path is not None and ffmpeg_path is not None:
+                self._attempt_repair_recording(ffmpeg_path=ffmpeg_path, output_path=output_path)
             if output_path is not None:
                 self._emit_log(f"Grabación guardada: {output_path}")
             self._emit_recording_state(False)
@@ -195,6 +208,7 @@ class CaptureService:
                 self._record_process = None
                 output_path = self._record_output_path
                 self._record_output_path = None
+                self._record_ffmpeg_path = None
                 should_emit_state = True
 
         if not should_emit_state:
@@ -238,6 +252,7 @@ class CaptureService:
         return env
 
     def _build_record_command(self, ffmpeg_path: Path, source_arg: str, output_path: Path, fps: int) -> list[str]:
+        target_fps = max(10, min(fps, 120))
         return [
             str(ffmpeg_path),
             "-hide_banner",
@@ -247,11 +262,16 @@ class CaptureService:
             "-f",
             "gdigrab",
             "-framerate",
-            str(max(10, min(fps, 120))),
+            str(target_fps),
             "-draw_mouse",
             "0",
+            "-use_wallclock_as_timestamps",
+            "1",
             "-i",
             source_arg,
+            "-an",
+            "-vf",
+            f"fps={target_fps}",
             "-c:v",
             "libx264",
             "-preset",
@@ -262,8 +282,47 @@ class CaptureService:
             "yuv420p",
             "-movflags",
             "+faststart",
+            "-video_track_timescale",
+            "90000",
             str(output_path),
         ]
+
+    def _attempt_repair_recording(self, ffmpeg_path: Path, output_path: Path) -> None:
+        if not output_path.exists():
+            return
+
+        temp_output = output_path.with_name(f"{output_path.stem}.repair{output_path.suffix}")
+        command = [
+            str(ffmpeg_path),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(output_path),
+            "-c",
+            "copy",
+            "-movflags",
+            "+faststart",
+            str(temp_output),
+        ]
+        result = subprocess.run(
+            command,
+            cwd=str(ffmpeg_path.parent),
+            capture_output=True,
+            text=True,
+            creationflags=self._creationflags(),
+            startupinfo=self._startupinfo(),
+            check=False,
+        )
+        if result.returncode != 0 or not temp_output.exists():
+            details = result.stderr.strip() or result.stdout.strip()
+            if details:
+                self._emit_log(f"[ADVERTENCIA] No se pudo reparar el MP4: {details}")
+            return
+
+        temp_output.replace(output_path)
+        self._emit_log("[PISTA] El archivo de grabacion se reparo automaticamente tras cierre forzado.")
 
     def _spawn_record_process(
         self,
