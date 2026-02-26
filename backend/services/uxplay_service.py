@@ -61,13 +61,13 @@ class UxPlayService:
         with self._lock:
             self._prune_dead_processes_locked()
             if self._processes:
-                raise RuntimeError("El receptor ya estÃ¡ en ejecuciÃ³n.")
+                raise RuntimeError("El receptor ya esta en ejecucion.")
 
             normalized_path = uxplay_path.expanduser().resolve()
             if not normalized_path.exists():
-                raise FileNotFoundError(f"No se encontrÃ³ UxPlay: {normalized_path}")
+                raise FileNotFoundError(f"No se encontro UxPlay: {normalized_path}")
             if not normalized_path.is_file():
-                raise FileNotFoundError(f"La ruta de UxPlay no es un archivo vÃ¡lido: {normalized_path}")
+                raise FileNotFoundError(f"La ruta de UxPlay no es un archivo valido: {normalized_path}")
 
             receiver_name = self._sanitize_receiver_name(receiver_name)
             runtime_args = [arg.strip() for arg in (extra_args or []) if arg and arg.strip()]
@@ -136,7 +136,7 @@ class UxPlayService:
             "[PISTA] Espera a ver 'Initialized server socket(s)' antes de conectar en iPhone para evitar doble intento."
         )
         if _from_auto_recovery:
-            self._emit_log("[PISTA] Receptor reiniciado automÃ¡ticamente para recuperar el primer enlace AirPlay.")
+            self._emit_log("[PISTA] Receptor reiniciado automaticamente para recuperar el primer enlace AirPlay.")
         for hint in self._diagnose_windows_discovery_risks():
             self._emit_log(hint)
         self._emit_state(True)
@@ -199,7 +199,7 @@ class UxPlayService:
             if removed and not self._processes:
                 should_emit_state = True
 
-        self._emit_log(self._format_instance_message(f"El proceso del receptor finalizÃ³ con cÃ³digo {exit_code}.", label))
+        self._emit_log(self._format_instance_message(f"El proceso del receptor finalizo con codigo {exit_code}.", label))
         if should_emit_state:
             self._emit_state(False)
 
@@ -252,7 +252,7 @@ class UxPlayService:
 
         if len(adapters) == 1:
             adapter_name, mac = adapters[0]
-            hint = f"[PISTA] MAC AirPlay fijada automÃ¡ticamente a {mac} ({adapter_name})."
+            hint = f"[PISTA] MAC AirPlay fijada automaticamente a {mac} ({adapter_name})."
             return [(receiver_name, ["-m", mac, *runtime_args], hint)]
 
         if self._has_explicit_port_arg(runtime_args):
@@ -305,7 +305,7 @@ class UxPlayService:
             return runtime_args, None
         return (
             ["-p", *runtime_args],
-            "[PISTA] Se habilitaron puertos AirPlay legados (-p) para mÃ¡xima compatibilidad de red/firewall.",
+            "[PISTA] Se habilitaron puertos AirPlay legados (-p) para maxima compatibilidad de red/firewall.",
         )
 
     def _build_instance_name(self, receiver_name: str, adapter_name: str, index: int) -> str:
@@ -551,7 +551,7 @@ class UxPlayService:
         try:
             process.wait(timeout=8)
         except subprocess.TimeoutExpired:
-            self._emit_log("El proceso del receptor no cerrÃ³ a tiempo. Forzando cierre.")
+            self._emit_log("El proceso del receptor no cerro a tiempo. Forzando cierre.")
             process.kill()
             process.wait(timeout=3)
 
@@ -581,23 +581,23 @@ class UxPlayService:
 
         if has_public_wifi:
             hints.append(
-                "[ADVERTENCIA] Wi-Fi estÃ¡ en perfil PÃºblico. Ese perfil suele bloquear descubrimiento AirPlay."
+                "[ADVERTENCIA] Wi-Fi esta en perfil Publico. Ese perfil suele bloquear descubrimiento AirPlay."
             )
 
         if has_active_vpn:
             hints.append(
-                "[ADVERTENCIA] VPN activa detectada. Algunas VPN bloquean trÃ¡fico local/mDNS y el iPhone no ve el receptor."
+                "[ADVERTENCIA] VPN activa detectada. Algunas VPN bloquean trafico local/mDNS y el iPhone no ve el receptor."
             )
 
         firewall_profile = self._query_current_firewall_profile_text()
         low_fw = self._normalize_for_match(firewall_profile)
         if "blockinbound,allowoutbound" in low_fw:
             hints.append(
-                "[ADVERTENCIA] El perfil de firewall activo tiene 'BlockInbound'. Puede impedir conexiÃ³n AirPlay."
+                "[ADVERTENCIA] El perfil de firewall activo tiene 'BlockInbound'. Puede impedir conexion AirPlay."
             )
         if "localfirewallrules" in low_fw and "n/a" in low_fw:
             hints.append(
-                "[ADVERTENCIA] Reglas locales de firewall deshabilitadas por polÃ­tica (GPO). Requiere ajuste de TI/red."
+                "[ADVERTENCIA] Reglas locales de firewall deshabilitadas por politica (GPO). Requiere ajuste de TI/red."
             )
 
         return hints
@@ -677,7 +677,7 @@ class UxPlayService:
 
     def _emit_log(self, message: str) -> None:
         if self._on_log is not None:
-            self._on_log(message)
+            self._on_log(self._normalize_log_message(message))
 
     def _emit_state(self, running: bool) -> None:
         if self._on_state_change is not None:
@@ -693,3 +693,22 @@ class UxPlayService:
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startupinfo.wShowWindow = 0
         return startupinfo
+
+    def _normalize_log_message(self, message: str) -> str:
+        # Normalize common mojibake sequences produced by mixed code pages.
+        if "\u00c3" not in message and "\u00c2" not in message:
+            return message
+
+        normalized = message
+        for _ in range(2):
+            try:
+                repaired = normalized.encode("latin-1").decode("utf-8")
+            except UnicodeError:
+                break
+            if repaired == normalized:
+                break
+            normalized = repaired
+            if "\u00c3" not in normalized and "\u00c2" not in normalized:
+                break
+        return normalized
+

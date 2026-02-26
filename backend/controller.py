@@ -35,7 +35,7 @@ class AppController:
         self._events.put(AppEvent(kind="state", running=running))
 
     def _handle_recording_state(self, recording: bool) -> None:
-        LOGGER.info("Estado de grabación: %s", "grabando" if recording else "inactiva")
+        LOGGER.info("Estado de grabacion: %s", "grabando" if recording else "inactiva")
         self._events.put(AppEvent(kind="recording", recording=recording))
 
     def start_receiver(
