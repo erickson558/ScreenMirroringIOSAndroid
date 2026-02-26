@@ -108,21 +108,6 @@ class CaptureService:
             )
 
             exited_early, early_output, early_code = self._check_early_startup_failure(process)
-            if exited_early and source_mode.strip().lower() == "window" and self._is_window_not_found_error(early_output):
-                fallback_source = "desktop"
-                fallback_command = self._build_record_command(ffmpeg_path, fallback_source, output_path, fps)
-                self._emit_log(
-                    "[ADVERTENCIA] No se encontró la ventana de UxPlay para grabación. "
-                    "Se cambia automáticamente a captura de escritorio."
-                )
-                process = self._spawn_record_process(
-                    command=fallback_command,
-                    ffmpeg_path=ffmpeg_path,
-                    env=env,
-                    creationflags=creationflags,
-                    startupinfo=startupinfo,
-                )
-                exited_early, early_output, early_code = self._check_early_startup_failure(process)
 
             if exited_early:
                 details = self._summarize_early_failure(early_output, early_code)
@@ -143,14 +128,14 @@ class CaptureService:
             )
             self._record_reader_thread.start()
 
-    def stop_recording(self) -> None:
+    def stop_recording(self, output_path: Path | None = None) -> None:
         process: subprocess.Popen[str] | None
-        output_path: Path | None
+        recorded_output_path: Path | None
         ffmpeg_path: Path | None
 
         with self._lock:
             process = self._record_process
-            output_path = self._record_output_path
+            recorded_output_path = self._record_output_path
             ffmpeg_path = self._record_ffmpeg_path
 
         if process is None or process.poll() is not None:
@@ -186,10 +171,13 @@ class CaptureService:
                 should_emit_state = True
 
         if should_emit_state:
-            if forced_stop and output_path is not None and ffmpeg_path is not None:
-                self._attempt_repair_recording(ffmpeg_path=ffmpeg_path, output_path=output_path)
-            if output_path is not None:
-                self._emit_log(f"Grabación guardada: {output_path}")
+            saved_output = recorded_output_path
+            if saved_output is not None and output_path is not None:
+                saved_output = self._finalize_recording_output(saved_output, output_path)
+            if forced_stop and saved_output is not None and ffmpeg_path is not None:
+                self._attempt_repair_recording(ffmpeg_path=ffmpeg_path, output_path=saved_output)
+            if saved_output is not None:
+                self._emit_log(f"Grabación guardada: {saved_output}")
             self._emit_recording_state(False)
 
     def _stream_record_output(self, process: subprocess.Popen[str]) -> None:
@@ -287,6 +275,29 @@ class CaptureService:
             str(output_path),
         ]
 
+    def _finalize_recording_output(self, source_path: Path, target_path: Path) -> Path:
+        if not source_path.exists():
+            return source_path
+
+        resolved_source = source_path.expanduser().resolve()
+        resolved_target = target_path.expanduser().resolve()
+        resolved_target.parent.mkdir(parents=True, exist_ok=True)
+
+        if resolved_source == resolved_target:
+            return resolved_source
+
+        try:
+            if resolved_target.exists():
+                resolved_target.unlink()
+            resolved_source.replace(resolved_target)
+            return resolved_target
+        except OSError as exc:
+            self._emit_log(
+                "[ADVERTENCIA] No se pudo mover la grabacion al destino elegido. "
+                f"Se conserva en: {resolved_source}. Detalle: {exc}"
+            )
+            return resolved_source
+
     def _attempt_repair_recording(self, ffmpeg_path: Path, output_path: Path) -> None:
         if not output_path.exists():
             return
@@ -360,12 +371,14 @@ class CaptureService:
                 output = ""
         return True, output, exit_code
 
-    def _is_window_not_found_error(self, text: str) -> bool:
-        low = text.lower()
-        return "can't find window" in low or "error opening input file title=" in low
-
     def _summarize_early_failure(self, output: str, exit_code: int | None) -> str:
         cleaned = " ".join((output or "").strip().split())
+        low = cleaned.lower()
+        if "can't find window" in low or "error opening input file title=" in low:
+            return (
+                "No se encontro la ventana de UxPlay. Verifica que el mirroring este activo "
+                "y que el titulo de ventana coincida."
+            )
         if cleaned:
             return cleaned
         if exit_code is not None:

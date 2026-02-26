@@ -94,8 +94,8 @@ class AppController:
             fps=fps,
         )
 
-    def stop_recording(self) -> None:
-        self._capture_service.stop_recording()
+    def stop_recording(self, output_path: Path | None = None) -> None:
+        self._capture_service.stop_recording(output_path=output_path)
 
     def is_recording(self) -> bool:
         return self._capture_service.is_recording

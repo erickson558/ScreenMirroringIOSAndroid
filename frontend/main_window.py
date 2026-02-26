@@ -4,6 +4,7 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 import shlex
+import tempfile
 import threading
 import tkinter as tk
 from tkinter import filedialog, scrolledtext, ttk
@@ -83,6 +84,7 @@ class MainWindow:
         self._suspend_save = False
         self._ntp_error_count = 0
         self._ntp_hint_shown = False
+        self._record_suggested_name: str | None = None
         self._busy_count = 0
         self._closing = False
         self._about_dialog: tk.Toplevel | None = None
@@ -736,9 +738,17 @@ class MainWindow:
             return
 
         if self._controller.is_recording():
+            save_path = self._prompt_recording_output_path()
+            if save_path is None:
+                self._set_status("Debes elegir destino para guardar la grabación antes de detener.", "warning")
+                return
+
+            def stop_recording() -> None:
+                self._controller.stop_recording(output_path=save_path)
+
             self._run_in_background(
                 action_label="Deteniendo grabación",
-                fn=self._controller.stop_recording,
+                fn=stop_recording,
                 success_status="Grabación detenida.",
                 busy=False,
             )
@@ -748,24 +758,19 @@ class MainWindow:
             self._set_status("Inicia el receptor de iPhone antes de grabar.", "warning")
             return
 
-        if not self._controller.is_running() and self._selected_device_mode() == DEVICE_MODE_ANDROID:
-            self._append_log("[PISTA] Modo Android sin receptor activo: se grabará escritorio.")
-            self._set_status("Grabación desde escritorio en modo Android.", "warning")
-
-        path = filedialog.asksaveasfilename(
-            title="Guardar grabación",
-            defaultextension=".mp4",
-            filetypes=[("Video MP4", "*.mp4"), ("Todos los archivos", "*.*")],
-            initialfile=f"grabacion_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4",
-        )
-        if not path:
+        if self._selected_device_mode() != DEVICE_MODE_IPHONE:
+            self._set_status("La grabación de video solo está habilitada para la ventana UxPlay (modo iPhone).", "warning")
             return
+
+        started_at = datetime.now()
+        self._record_suggested_name = f"grabacion_{started_at.strftime('%Y%m%d_%H%M%S')}.mp4"
+        temp_path = Path(tempfile.gettempdir()) / f"ScreenMirrorIOSAndroid_{started_at.strftime('%Y%m%d_%H%M%S_%f')}.mp4"
 
         def start_recording() -> None:
             self._controller.start_recording(
                 uxplay_path=Path(self._uxplay_path_var.get().strip()),
-                output_path=Path(path),
-                source_mode=self._capture_sources.get(self._capture_source_var.get(), "desktop"),
+                output_path=temp_path,
+                source_mode="window",
                 window_title=self._capture_title_var.get().strip(),
                 fps=int(self._capture_fps_var.get()),
             )
@@ -776,6 +781,27 @@ class MainWindow:
             success_status="Grabación iniciada.",
             busy=False,
         )
+
+    def _suggest_recording_name(self) -> str:
+        if self._record_suggested_name:
+            return self._record_suggested_name
+        return f"grabacion_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+
+    def _default_recording_output_path(self) -> Path:
+        documents = Path.home() / "Documents"
+        base_dir = documents if documents.exists() else Path.cwd()
+        return base_dir / self._suggest_recording_name()
+
+    def _prompt_recording_output_path(self) -> Path | None:
+        selected = filedialog.asksaveasfilename(
+            title="Guardar grabación",
+            defaultextension=".mp4",
+            filetypes=[("Video MP4", "*.mp4"), ("Todos los archivos", "*.*")],
+            initialfile=self._suggest_recording_name(),
+        )
+        if not selected:
+            return None
+        return Path(selected)
 
     def _parse_args(self, raw: str) -> list[str]:
         text = raw.strip()
@@ -796,10 +822,15 @@ class MainWindow:
             elif event.kind == "state":
                 self._set_running_state(event.running)
                 if not event.running and self._controller.is_recording():
+                    auto_save_path = self._default_recording_output_path()
+
+                    def stop_due_to_receiver_stop() -> None:
+                        self._controller.stop_recording(output_path=auto_save_path)
+
                     self._run_in_background(
                         action_label="Deteniendo grabación por parada de receptor",
-                        fn=self._controller.stop_recording,
-                        success_status="Grabación detenida junto al receptor.",
+                        fn=stop_due_to_receiver_stop,
+                        success_status=f"Grabación detenida junto al receptor. Archivo: {auto_save_path}",
                         busy=False,
                     )
             elif event.kind == "recording":
@@ -857,6 +888,7 @@ class MainWindow:
             self._set_status("Grabación activa.", "success")
             return
 
+        self._record_suggested_name = None
         self._record_status_var.set("Grabación: inactiva")
         self._btn_record.configure(text="Grabar", underline=0, style="Danger.TButton")
         self._pill_record.configure(bg="#1f2f4b", fg="#9fc9ff", highlightbackground="#365c8f")
