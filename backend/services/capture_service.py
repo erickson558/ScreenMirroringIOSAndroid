@@ -284,7 +284,7 @@ class CaptureService:
         return env
 
     def _build_record_command(self, ffmpeg_path: Path, source_arg: str, output_path: Path, fps: int) -> list[str]:
-        target_fps = max(10, min(fps, 120))
+        target_fps = max(15, min(fps, 60))
         return [
             str(ffmpeg_path),
             "-hide_banner",
@@ -295,23 +295,25 @@ class CaptureService:
             "gdigrab",
             "-framerate",
             str(target_fps),
+            "-thread_queue_size",
+            "1024",
             "-draw_mouse",
             "0",
-            "-use_wallclock_as_timestamps",
-            "1",
             "-i",
             source_arg,
             "-an",
-            "-vf",
-            f"fps={target_fps}",
             "-c:v",
             "libx264",
             "-preset",
             "veryfast",
-            "-tune",
-            "zerolatency",
+            "-crf",
+            "21",
             "-pix_fmt",
             "yuv420p",
+            "-r",
+            str(target_fps),
+            "-vsync",
+            "cfr",
             "-movflags",
             "+faststart",
             "-video_track_timescale",

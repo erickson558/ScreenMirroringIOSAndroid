@@ -19,6 +19,14 @@ from backend.device_modes import (
     list_device_modes,
 )
 from backend.gui_config_store import GuiConfigStore
+from backend.i18n import (
+    LANGUAGE_EN,
+    LANGUAGE_ES,
+    LANGUAGE_LABELS,
+    localize_log,
+    normalize_language,
+    tr,
+)
 from backend.receiver_profiles import DEFAULT_PROFILE_KEY, get_profile, list_profiles
 
 
@@ -47,21 +55,20 @@ class MainWindow:
         self._profiles = list_profiles()
         self._profiles_by_label = {p.label: p for p in self._profiles}
         self._device_modes = list_device_modes()
-        self._device_by_key = {m.key: m for m in self._device_modes}
-        self._capture_sources = {
-            "Escritorio (recomendado)": "desktop",
-            "Ventana de UxPlay": "window",
-        }
+        self._capture_source_modes = ("desktop", "window")
 
         saved = self._store.load()
+        self._language_code = normalize_language(saved.get("language", LANGUAGE_ES))
+        self._language_var = tk.StringVar(value=self._language_code)
+
         initial_profile = self._resolve_profile(saved.get("profile_key", default_profile_key))
         if str(saved.get("profile_label", "")).strip() in self._profiles_by_label:
             initial_profile = self._profiles_by_label[str(saved["profile_label"]).strip()]
 
         initial_mode = self._resolve_device_mode(saved.get("device_mode", default_device_mode_key))
-        initial_source = str(saved.get("capture_source_label", "Escritorio (recomendado)"))
-        if initial_source not in self._capture_sources:
-            initial_source = "Escritorio (recomendado)"
+        initial_source_mode = self._capture_source_mode_from_value(
+            str(saved.get("capture_source_mode", saved.get("capture_source_label", "desktop")))
+        )
 
         self._receiver_name_var = tk.StringVar(value=str(saved.get("receiver_name", default_receiver_name)))
         self._uxplay_path_var = tk.StringVar(value=str(saved.get("uxplay_path", str(default_uxplay_path))))
@@ -71,15 +78,15 @@ class MainWindow:
         self._append_hostname_suffix_var = tk.BooleanVar(
             value=self._safe_bool(saved.get("append_hostname_suffix", False), False)
         )
-        self._capture_source_var = tk.StringVar(value=initial_source)
+        self._capture_source_var = tk.StringVar(value=self._capture_source_label(initial_source_mode))
         self._capture_title_var = tk.StringVar(value=str(saved.get("capture_window_title", "Direct3D11 renderer")))
         self._capture_fps_var = tk.IntVar(value=self._safe_int(saved.get("capture_fps", 30), 30))
         self._device_mode_var = tk.StringVar(value=initial_mode)
-        self._device_hint_var = tk.StringVar(value=self._device_by_key[initial_mode].description)
+        self._device_hint_var = tk.StringVar(value=self._device_mode_description(initial_mode))
 
-        self._receiver_status_var = tk.StringVar(value="Receptor: detenido")
-        self._record_status_var = tk.StringVar(value="Grabación: inactiva")
-        self._status_var = tk.StringVar(value=f"Listo. {self._app_name} v{self._app_version}")
+        self._receiver_status_var = tk.StringVar(value=self._tr("receiver_status_stopped"))
+        self._record_status_var = tk.StringVar(value=self._tr("record_status_inactive"))
+        self._status_var = tk.StringVar(value=self._tr("status_ready", app_name=self._app_name, version=self._app_version))
 
         self._save_after_id: str | None = None
         self._suspend_save = False
@@ -92,6 +99,7 @@ class MainWindow:
         self._busy_count = 0
         self._closing = False
         self._about_dialog: tk.Toplevel | None = None
+        self._log_history: list[tuple[str, str]] = []
 
         self._build_ui()
         self._apply_device_mode_ui(log_change=False)
@@ -106,8 +114,38 @@ class MainWindow:
         self._root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._root.after(self.POLL_INTERVAL_MS, self._poll_events)
 
-    def _build_ui(self) -> None:
-        self._root.title(f"{self._app_name} - Studio Neon")
+    def _tr(self, key: str, **kwargs: object) -> str:
+        return tr(self._language_code, key, **kwargs)
+
+    def _capture_source_label(self, mode: str) -> str:
+        key = "source_desktop" if mode == "desktop" else "source_window"
+        return self._tr(key)
+
+    def _capture_source_mode_from_value(self, value: str) -> str:
+        normalized = " ".join(str(value).split()).strip().lower()
+        if normalized in self._capture_source_modes:
+            return normalized
+
+        for mode in self._capture_source_modes:
+            es_label = tr(LANGUAGE_ES, "source_desktop" if mode == "desktop" else "source_window").lower()
+            en_label = tr(LANGUAGE_EN, "source_desktop" if mode == "desktop" else "source_window").lower()
+            if normalized in {es_label, en_label}:
+                return mode
+
+        return "desktop"
+
+    def _device_mode_label(self, mode_key: str) -> str:
+        if mode_key == DEVICE_MODE_ANDROID:
+            return self._tr("device_android")
+        return self._tr("device_iphone")
+
+    def _device_mode_description(self, mode_key: str) -> str:
+        if mode_key == DEVICE_MODE_ANDROID:
+            return self._tr("device_hint_android")
+        return self._tr("device_hint_iphone")
+
+    def _build_ui(self, announce_init: bool = True) -> None:
+        self._root.title(self._tr("window_title", app_name=self._app_name))
         self._root.geometry("1120x720")
         self._root.minsize(960, 620)
         self._root.configure(bg="#050814")
@@ -181,7 +219,7 @@ class MainWindow:
 
         self._header_label = ttk.Label(
             header_wrap,
-            text=f"{self._app_name}  |  iPhone AirPlay + Android Proyección inalámbrica",
+            text=self._tr("header_title", app_name=self._app_name),
             font=("Segoe UI Semibold", 18),
             foreground="#8bd4ff",
             background="#050814",
@@ -190,7 +228,7 @@ class MainWindow:
 
         ttk.Label(
             header_wrap,
-            text="Modo cine en vivo",
+            text=self._tr("header_mode"),
             font=("Segoe UI", 10),
             foreground="#89a8d8",
             background="#050814",
@@ -208,7 +246,7 @@ class MainWindow:
 
         self._btn_receiver = ttk.Button(
             top,
-            text="Iniciar receptor",
+            text=self._tr("btn_start_receiver"),
             underline=0,
             style="Primary.TButton",
             command=self._toggle_receiver,
@@ -216,7 +254,7 @@ class MainWindow:
         self._btn_receiver.pack(side="left")
         self._btn_snapshot = ttk.Button(
             top,
-            text="Captura",
+            text=self._tr("btn_snapshot"),
             underline=0,
             style="Glass.TButton",
             command=self._take_snapshot,
@@ -224,7 +262,7 @@ class MainWindow:
         self._btn_snapshot.pack(side="left", padx=(8, 0))
         self._btn_record = ttk.Button(
             top,
-            text="Grabar",
+            text=self._tr("btn_record"),
             underline=0,
             style="Danger.TButton",
             command=self._toggle_recording,
@@ -232,7 +270,7 @@ class MainWindow:
         self._btn_record.pack(side="left", padx=(8, 0))
         self._btn_exit = ttk.Button(
             top,
-            text="Salir",
+            text=self._tr("btn_exit"),
             underline=0,
             style="Glass.TButton",
             command=self._on_close,
@@ -285,7 +323,7 @@ class MainWindow:
         self._build_card_stream(left)
         self._build_card_capture(left)
 
-        logs_card = ttk.LabelFrame(right, text="Registros de ejecución", style="Card.TLabelframe", padding=8)
+        logs_card = ttk.LabelFrame(right, text=self._tr("card_runtime_logs"), style="Card.TLabelframe", padding=8)
         logs_card.grid(row=0, column=0, sticky="nsew")
         logs_card.rowconfigure(0, weight=1)
         logs_card.columnconfigure(0, weight=1)
@@ -310,29 +348,47 @@ class MainWindow:
         status_wrap.pack(fill="x", pady=(8, 0))
         self._status_label = ttk.Label(status_wrap, textvariable=self._status_var, style="Status.TLabel")
         self._status_label.pack(side="left", fill="x", expand=True)
-        ttk.Label(status_wrap, text=f"Versión {self._app_version}", style="Version.TLabel").pack(side="right")
+        ttk.Label(status_wrap, text=self._tr("version_label", version=self._app_version), style="Version.TLabel").pack(
+            side="right"
+        )
 
-        self._append_log("Aplicación inicializada.")
+        if announce_init:
+            self._append_log(self._tr("app_initialized"))
 
     def _build_menu(self) -> None:
-        menu_bar = tk.Menu(self._root)
+        self._menu_bar = tk.Menu(self._root)
 
-        menu_archivo = tk.Menu(menu_bar, tearoff=0)
-        menu_archivo.add_command(label="Salir", underline=0, accelerator="Alt+S", command=self._on_close)
-        menu_bar.add_cascade(label="Archivo", underline=0, menu=menu_archivo)
+        self._menu_file = tk.Menu(self._menu_bar, tearoff=0)
+        self._menu_file.add_command(label=self._tr("menu_exit"), underline=0, accelerator="Alt+S", command=self._on_close)
+        self._menu_bar.add_cascade(label=self._tr("menu_file"), underline=0, menu=self._menu_file)
 
-        menu_ayuda = tk.Menu(menu_bar, tearoff=0)
-        menu_ayuda.add_command(label="Acerca de", underline=0, accelerator="F1", command=self._show_about_dialog)
-        menu_bar.add_cascade(label="Ayuda", underline=0, menu=menu_ayuda)
+        self._menu_language = tk.Menu(self._menu_bar, tearoff=0)
+        self._menu_language.add_radiobutton(
+            label=self._tr("menu_language_es"),
+            value=LANGUAGE_ES,
+            variable=self._language_var,
+            command=lambda: self._on_language_selected(LANGUAGE_ES),
+        )
+        self._menu_language.add_radiobutton(
+            label=self._tr("menu_language_en"),
+            value=LANGUAGE_EN,
+            variable=self._language_var,
+            command=lambda: self._on_language_selected(LANGUAGE_EN),
+        )
+        self._menu_bar.add_cascade(label=self._tr("menu_language"), underline=0, menu=self._menu_language)
 
-        self._root.configure(menu=menu_bar)
+        self._menu_help = tk.Menu(self._menu_bar, tearoff=0)
+        self._menu_help.add_command(label=self._tr("menu_about"), underline=0, accelerator="F1", command=self._show_about_dialog)
+        self._menu_bar.add_cascade(label=self._tr("menu_help"), underline=0, menu=self._menu_help)
+
+        self._root.configure(menu=self._menu_bar)
 
     def _build_card_receiver(self, parent: ttk.Frame) -> None:
-        card = ttk.LabelFrame(parent, text="Configuración del receptor", style="Card.TLabelframe", padding=10)
+        card = ttk.LabelFrame(parent, text=self._tr("card_receiver_config"), style="Card.TLabelframe", padding=10)
         card.pack(fill="x", pady=(0, 8))
         card.columnconfigure(1, weight=1)
 
-        ttk.Label(card, text="Nombre visible en iPhone", underline=0, style="Card.TLabel").grid(
+        ttk.Label(card, text=self._tr("lbl_receiver_name"), underline=0, style="Card.TLabel").grid(
             row=0, column=0, sticky="w", padx=(0, 8)
         )
         self._entry_name = ttk.Entry(card, textvariable=self._receiver_name_var)
@@ -340,20 +396,30 @@ class MainWindow:
 
         self._chk_hostname_suffix = ttk.Checkbutton(
             card,
-            text="Agregar @equipo al nombre visible",
+            text=self._tr("chk_append_hostname"),
             variable=self._append_hostname_suffix_var,
             underline=8,
             command=self._schedule_save,
         )
         self._chk_hostname_suffix.grid(row=1, column=1, columnspan=2, sticky="w", pady=(0, 8))
 
-        ttk.Label(card, text="Ruta de UxPlay", underline=0, style="Card.TLabel").grid(row=2, column=0, sticky="w", padx=(0, 8))
+        ttk.Label(card, text=self._tr("lbl_uxplay_path"), underline=0, style="Card.TLabel").grid(
+            row=2, column=0, sticky="w", padx=(0, 8)
+        )
         self._entry_path = ttk.Entry(card, textvariable=self._uxplay_path_var)
         self._entry_path.grid(row=2, column=1, sticky="ew", pady=(0, 8))
-        self._btn_browse = ttk.Button(card, text="Examinar...", underline=1, style="Glass.TButton", command=self._browse_uxplay)
+        self._btn_browse = ttk.Button(
+            card,
+            text=self._tr("btn_browse"),
+            underline=1,
+            style="Glass.TButton",
+            command=self._browse_uxplay,
+        )
         self._btn_browse.grid(row=2, column=2, sticky="ew", padx=(8, 0), pady=(0, 8))
 
-        ttk.Label(card, text="Dispositivo", underline=0, style="Card.TLabel").grid(row=3, column=0, sticky="nw", padx=(0, 8))
+        ttk.Label(card, text=self._tr("lbl_device"), underline=0, style="Card.TLabel").grid(
+            row=3, column=0, sticky="nw", padx=(0, 8)
+        )
         radios = ttk.Frame(card)
         radios.grid(row=3, column=1, columnspan=2, sticky="w")
         self._device_radio_buttons: list[ttk.Radiobutton] = []
@@ -361,7 +427,7 @@ class MainWindow:
             underline = 1 if mode.key == DEVICE_MODE_IPHONE else 0
             radio = ttk.Radiobutton(
                 radios,
-                text=mode.label,
+                text=self._device_mode_label(mode.key),
                 underline=underline,
                 style="Card.TRadiobutton",
                 variable=self._device_mode_var,
@@ -376,11 +442,13 @@ class MainWindow:
         )
 
     def _build_card_stream(self, parent: ttk.Frame) -> None:
-        card = ttk.LabelFrame(parent, text="Transmisión y latencia", style="Card.TLabelframe", padding=10)
+        card = ttk.LabelFrame(parent, text=self._tr("card_stream_latency"), style="Card.TLabelframe", padding=10)
         card.pack(fill="x", pady=(0, 8))
         card.columnconfigure(1, weight=1)
 
-        ttk.Label(card, text="Perfil", underline=3, style="Card.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        ttk.Label(card, text=self._tr("lbl_profile"), underline=3, style="Card.TLabel").grid(
+            row=0, column=0, sticky="w", padx=(0, 8)
+        )
         self._combo_profile = ttk.Combobox(
             card,
             textvariable=self._profile_var,
@@ -394,44 +462,56 @@ class MainWindow:
             row=1, column=0, columnspan=3, sticky="w", pady=(0, 8)
         )
 
-        ttk.Label(card, text="Args extras", underline=0, style="Card.TLabel").grid(row=2, column=0, sticky="w", padx=(0, 8))
+        ttk.Label(card, text=self._tr("lbl_extra_args"), underline=0, style="Card.TLabel").grid(
+            row=2, column=0, sticky="w", padx=(0, 8)
+        )
         self._entry_args = ttk.Entry(card, textvariable=self._custom_args_var)
         self._entry_args.grid(row=2, column=1, columnspan=2, sticky="ew")
 
     def _build_card_capture(self, parent: ttk.Frame) -> None:
-        card = ttk.LabelFrame(parent, text="Captura y grabación", style="Card.TLabelframe", padding=10)
+        card = ttk.LabelFrame(parent, text=self._tr("card_capture_record"), style="Card.TLabelframe", padding=10)
         card.pack(fill="x")
         card.columnconfigure(1, weight=1)
 
-        ttk.Label(card, text="Fuente", underline=0, style="Card.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        ttk.Label(card, text=self._tr("lbl_source"), underline=0, style="Card.TLabel").grid(
+            row=0, column=0, sticky="w", padx=(0, 8)
+        )
         self._combo_capture_source = ttk.Combobox(
             card,
             textvariable=self._capture_source_var,
-            values=list(self._capture_sources.keys()),
+            values=[self._capture_source_label(mode) for mode in self._capture_source_modes],
             state="readonly",
         )
         self._combo_capture_source.grid(row=0, column=1, columnspan=2, sticky="ew", pady=(0, 8))
 
         ttk.Label(
             card,
-            text="Título de ventana (Direct3D11 renderer)",
+            text=self._tr("lbl_window_title"),
             underline=2,
             style="Card.TLabel",
         ).grid(row=1, column=0, sticky="w", padx=(0, 8))
         self._entry_capture_title = ttk.Entry(card, textvariable=self._capture_title_var)
         self._entry_capture_title.grid(row=1, column=1, columnspan=2, sticky="ew", pady=(0, 8))
 
-        ttk.Label(card, text="FPS de grabación", underline=0, style="Card.TLabel").grid(row=2, column=0, sticky="w", padx=(0, 8))
+        ttk.Label(card, text=self._tr("lbl_capture_fps"), underline=0, style="Card.TLabel").grid(
+            row=2, column=0, sticky="w", padx=(0, 8)
+        )
         self._spin_capture_fps = ttk.Spinbox(
             card,
             from_=15,
-            to=120,
+            to=60,
             increment=1,
             textvariable=self._capture_fps_var,
             width=8,
         )
         self._spin_capture_fps.grid(row=2, column=1, sticky="w")
-        self._btn_clear = ttk.Button(card, text="Borrar registros", underline=0, style="Glass.TButton", command=self._clear_logs)
+        self._btn_clear = ttk.Button(
+            card,
+            text=self._tr("btn_clear_logs"),
+            underline=0,
+            style="Glass.TButton",
+            command=self._clear_logs,
+        )
         self._btn_clear.grid(row=2, column=2, sticky="e")
 
     def _bind_hotkeys(self) -> None:
@@ -511,6 +591,53 @@ class MainWindow:
         self._append_hostname_suffix_var.set(not self._append_hostname_suffix_var.get())
         self._schedule_save()
 
+    def _on_language_selected(self, language_code: str) -> None:
+        normalized = normalize_language(language_code)
+        if normalized == self._language_code:
+            self._language_var.set(self._language_code)
+            return
+        self._language_code = normalized
+        self._language_var.set(self._language_code)
+        self._rebuild_ui_for_language()
+        self._append_log(self._tr("lang_changed_log", language_label=LANGUAGE_LABELS[self._language_code]))
+        self._schedule_save()
+
+    def _rebuild_ui_for_language(self) -> None:
+        current_geometry = self._root.geometry()
+        source_mode = self._capture_source_mode_from_value(self._capture_source_var.get())
+        self._capture_source_var.set(self._capture_source_label(source_mode))
+        self._device_hint_var.set(self._device_mode_description(self._selected_device_mode()))
+
+        if self._animation_after_id is not None:
+            self._root.after_cancel(self._animation_after_id)
+            self._animation_after_id = None
+        if self._about_dialog is not None and self._about_dialog.winfo_exists():
+            self._about_dialog.destroy()
+        self._about_dialog = None
+
+        for child in self._root.winfo_children():
+            child.destroy()
+
+        self._build_ui(announce_init=False)
+        self._apply_saved_geometry(current_geometry)
+        self._restore_log_history()
+        self._apply_device_mode_ui(log_change=False)
+        self._set_running_state(self._controller.is_running())
+        self._set_record_state(self._controller.is_recording())
+        self._set_status(self._tr("status_ready", app_name=self._app_name, version=self._app_version), "info")
+        self._start_intro_animation()
+
+    def _restore_log_history(self) -> None:
+        self._log_box.configure(state="normal")
+        self._log_box.delete("1.0", "end")
+        for line, tag in self._log_history:
+            if tag:
+                self._log_box.insert("end", line, tag)
+            else:
+                self._log_box.insert("end", line)
+        self._log_box.see("end")
+        self._log_box.configure(state="disabled")
+
     def _install_autosave(self) -> None:
         vars_ = (
             self._receiver_name_var,
@@ -543,6 +670,7 @@ class MainWindow:
         self._save_after_id = None
         profile = self._profiles_by_label.get(self._profile_var.get())
         profile_key = profile.key if profile else DEFAULT_PROFILE_KEY
+        capture_source_mode = self._capture_source_mode_from_value(self._capture_source_var.get())
         data = {
             "receiver_name": self._receiver_name_var.get().strip(),
             "uxplay_path": self._uxplay_path_var.get().strip(),
@@ -551,16 +679,18 @@ class MainWindow:
             "custom_args": self._custom_args_var.get(),
             "append_hostname_suffix": bool(self._append_hostname_suffix_var.get()),
             "capture_source_label": self._capture_source_var.get(),
+            "capture_source_mode": capture_source_mode,
             "capture_window_title": self._capture_title_var.get(),
             "capture_fps": int(self._capture_fps_var.get()),
             "device_mode": self._selected_device_mode(),
+            "language": self._language_code,
             "window_geometry": self._root.geometry(),
         }
         try:
             self._store.save(data)
         except OSError as exc:
-            self._append_log(f"[ADVERTENCIA] No se pudo guardar config.json: {exc}")
-            self._set_status(f"No se pudo guardar config.json: {exc}", "warning")
+            self._append_log(self._tr("warn_save_config_failed", error=exc))
+            self._set_status(self._tr("status_save_config_failed", error=exc), "warning")
 
     def _apply_saved_geometry(self, geometry: str) -> None:
         value = geometry.strip()
@@ -576,7 +706,7 @@ class MainWindow:
             n = int(value)
         except (TypeError, ValueError):
             return default
-        return max(15, min(120, n))
+        return max(15, min(60, n))
 
     def _safe_bool(self, value: object, default: bool) -> bool:
         if isinstance(value, bool):
@@ -611,19 +741,19 @@ class MainWindow:
     def _on_device_mode_changed(self) -> None:
         mode = self._selected_device_mode()
         if mode == DEVICE_MODE_ANDROID and self._controller.is_running():
-            self._append_log("[PISTA] Cambio a Android: se detiene el receptor de iPhone automáticamente.")
+            self._append_log(self._tr("log_switch_to_android"))
             self._run_in_background(
-                action_label="Deteniendo receptor de iPhone",
+                action_label=self._tr("action_stop_receiver_iphone"),
                 fn=self._controller.stop_receiver,
-                success_status="Receptor de iPhone detenido.",
+                success_status=self._tr("success_stop_receiver_iphone"),
             )
 
         self._apply_device_mode_ui(log_change=True)
         if mode == DEVICE_MODE_ANDROID:
             self._run_in_background(
-                action_label="Analizando compatibilidad Miracast",
+                action_label=self._tr("action_diagnose_android"),
                 fn=self._diagnose_android_mode,
-                success_status="Diagnóstico Android completado.",
+                success_status=self._tr("success_diagnose_android"),
                 busy=False,
             )
 
@@ -631,28 +761,27 @@ class MainWindow:
 
     def _apply_device_mode_ui(self, log_change: bool) -> None:
         mode = self._selected_device_mode()
-        selected_mode = self._device_by_key.get(mode, self._device_by_key[DEFAULT_DEVICE_MODE_KEY])
-        self._device_hint_var.set(selected_mode.description)
+        self._device_hint_var.set(self._device_mode_description(mode))
 
         if mode == DEVICE_MODE_IPHONE:
             self._combo_profile.configure(state="readonly")
             self._entry_args.configure(state="normal")
             if log_change:
-                self._append_log("Modo de dispositivo: iPhone (AirPlay).")
-                self._set_status("Modo iPhone activo.", "info")
+                self._append_log(self._tr("log_mode_iphone"))
+                self._set_status(self._tr("status_mode_iphone"), "info")
             if not self._controller.is_running():
-                self._btn_receiver.configure(text="Iniciar receptor", underline=0, style="Primary.TButton")
+                self._btn_receiver.configure(text=self._tr("btn_start_receiver"), underline=0, style="Primary.TButton")
             self._set_running_state(self._controller.is_running())
             return
 
         self._combo_profile.configure(state="disabled")
         self._entry_args.configure(state="disabled")
-        self._btn_receiver.configure(text="Abrir proyección Android", underline=0, style="Primary.TButton")
-        self._receiver_status_var.set("Receptor: modo Android")
+        self._btn_receiver.configure(text=self._tr("btn_open_android_projection"), underline=0, style="Primary.TButton")
+        self._receiver_status_var.set(self._tr("receiver_status_android"))
         self._pill_receiver.configure(bg="#1f2f4b", fg="#9fc9ff", highlightbackground="#365c8f")
         if log_change:
-            self._append_log("Modo de dispositivo: Android (Proyección inalámbrica).")
-            self._set_status("Modo Android activo.", "info")
+            self._append_log(self._tr("log_mode_android"))
+            self._set_status(self._tr("status_mode_android"), "info")
 
     def _on_profile_changed(self, _event: tk.Event[ttk.Combobox]) -> None:
         profile = self._profiles_by_label.get(self._profile_var.get())
@@ -662,21 +791,21 @@ class MainWindow:
 
     def _browse_uxplay(self) -> None:
         if self._is_busy():
-            self._set_status("Espera a que finalice la operación actual.", "warning")
+            self._set_status(self._tr("status_wait_current_operation"), "warning")
             return
 
         selected = filedialog.askopenfilename(
-            title="Selecciona el ejecutable de UxPlay",
+            title=self._tr("title_pick_uxplay"),
             filetypes=[("Ejecutable", "*.exe"), ("Todos los archivos", "*.*")],
         )
         if selected:
             self._uxplay_path_var.set(selected)
-            self._set_status("Ruta de UxPlay actualizada.", "success")
+            self._set_status(self._tr("status_uxplay_path_updated"), "success")
             self._schedule_save()
 
     def _toggle_receiver(self) -> None:
         if self._is_busy():
-            self._set_status("Ya hay una operación en curso. Espera un momento.", "warning")
+            self._set_status(self._tr("status_operation_in_progress"), "warning")
             return
 
         if self._selected_device_mode() == DEVICE_MODE_ANDROID:
@@ -685,16 +814,16 @@ class MainWindow:
 
         if self._controller.is_running():
             self._run_in_background(
-                action_label="Deteniendo receptor",
+                action_label=self._tr("action_stop_receiver"),
                 fn=self._controller.stop_receiver,
-                success_status="Receptor detenido.",
+                success_status=self._tr("success_receiver_stopped"),
             )
             return
 
         uxplay_path = self._uxplay_path_var.get().strip()
         if not uxplay_path:
-            self._append_log("[ERROR] Falta la ruta de UxPlay.")
-            self._set_status("Falta la ruta de UxPlay.", "error")
+            self._append_log(f"[ERROR] {self._tr('error_missing_uxplay_path')}")
+            self._set_status(self._tr("error_missing_uxplay_path"), "error")
             return
 
         name = self._receiver_name_var.get().strip() or "ScreenMirrorIOSAndroid"
@@ -708,7 +837,13 @@ class MainWindow:
             return
 
         args = [*profile.args, *extra]
-        self._append_log(f"Perfil: {profile.label} | Args: {' '.join(args) if args else '(sin argumentos)'}")
+        self._append_log(
+            self._tr(
+                "profile_args_log",
+                profile_label=profile.label,
+                args=" ".join(args) if args else self._tr("args_none"),
+            )
+        )
 
         def start_receiver() -> None:
             self._controller.start_receiver(
@@ -718,18 +853,20 @@ class MainWindow:
                 append_hostname_suffix=bool(self._append_hostname_suffix_var.get()),
             )
 
-        suffix_mode = "con sufijo @equipo" if self._append_hostname_suffix_var.get() else "sin sufijo @equipo"
+        suffix_mode = self._tr("suffix_with_host") if self._append_hostname_suffix_var.get() else self._tr(
+            "suffix_without_host"
+        )
         self._run_in_background(
-            action_label="Iniciando receptor",
+            action_label=self._tr("action_start_receiver"),
             fn=start_receiver,
-            success_status=f"Receptor iniciándose con nombre: {name} ({suffix_mode})",
+            success_status=self._tr("success_start_receiver", name=name, suffix_mode=suffix_mode),
         )
 
     def _open_android_projection(self) -> None:
         self._run_in_background(
-            action_label="Abriendo proyección Android",
+            action_label=self._tr("action_open_android_projection"),
             fn=self._controller.open_android_projection_portal,
-            success_status="Configuración de Proyección Android abierta.",
+            success_status=self._tr("success_open_android_projection"),
         )
 
     def _diagnose_android_mode(self) -> None:
@@ -742,13 +879,13 @@ class MainWindow:
         supported = diag.get("miracast_receiver_supported")
 
         if capability and capability != "Unknown":
-            self._append_log(f"[PISTA] Wireless Display: {capability}")
+            self._append_log(self._tr("hint_wireless_display", capability=capability))
         if line:
-            self._append_log(f"[PISTA] Diagnóstico Miracast: {line}")
+            self._append_log(self._tr("hint_miracast_diag", line=line))
 
         if capability == "NotPresent":
-            self._append_log("[ADVERTENCIA] La característica opcional 'Wireless Display' no está instalada.")
-            self._set_status("Instala 'Wireless Display' en Windows y reinicia.", "warning")
+            self._append_log(self._tr("warn_wireless_display_missing"))
+            self._set_status(self._tr("status_install_wireless_display"), "warning")
             return
 
         if capability.startswith("Unknown ("):
@@ -756,27 +893,27 @@ class MainWindow:
             self._set_status(capability, "warning")
 
         if supported is False:
-            self._append_log("[ADVERTENCIA] Este equipo no admite recibir Miracast.")
-            self._set_status("Este equipo no admite recibir Miracast.", "warning")
+            self._append_log(self._tr("warn_miracast_not_supported"))
+            self._set_status(self._tr("status_miracast_not_supported"), "warning")
             return
 
-        self._append_log("[PISTA] Android activo. Pulsa 'Abrir proyección Android'.")
-        self._set_status("Android listo para proyección inalámbrica.", "success")
+        self._append_log(self._tr("hint_android_ready"))
+        self._set_status(self._tr("status_android_ready"), "success")
 
     def _take_snapshot(self) -> None:
         if self._is_busy():
-            self._set_status("Ya hay una operación en curso. Espera un momento.", "warning")
+            self._set_status(self._tr("status_operation_in_progress"), "warning")
             return
 
         if not self._controller.is_running():
-            self._append_log("[PISTA] El receptor está detenido. Se capturará el escritorio igualmente.")
-            self._set_status("Receptor detenido: captura desde escritorio.", "warning")
+            self._append_log(self._tr("hint_receiver_stopped_snapshot"))
+            self._set_status(self._tr("status_receiver_stopped_snapshot"), "warning")
 
         path = filedialog.asksaveasfilename(
-            title="Guardar captura",
+            title=self._tr("title_save_snapshot"),
             defaultextension=".png",
             filetypes=[("Imagen PNG", "*.png"), ("Imagen JPEG", "*.jpg"), ("Todos los archivos", "*.*")],
-            initialfile=f"captura_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+            initialfile=self._tr("initial_snapshot_name", timestamp=datetime.now().strftime("%Y%m%d_%H%M%S")),
         )
         if not path:
             return
@@ -785,44 +922,44 @@ class MainWindow:
             self._controller.take_snapshot(
                 uxplay_path=Path(self._uxplay_path_var.get().strip()),
                 output_path=Path(path),
-                source_mode=self._capture_sources.get(self._capture_source_var.get(), "desktop"),
+                source_mode=self._capture_source_mode_from_value(self._capture_source_var.get()),
                 window_title=self._capture_title_var.get().strip(),
             )
 
         self._run_in_background(
-            action_label="Tomando captura",
+            action_label=self._tr("action_take_snapshot"),
             fn=do_snapshot,
-            success_status="Captura completada.",
+            success_status=self._tr("success_snapshot"),
         )
 
     def _toggle_recording(self) -> None:
         if self._is_busy():
-            self._set_status("Ya hay una operación en curso. Espera un momento.", "warning")
+            self._set_status(self._tr("status_operation_in_progress"), "warning")
             return
 
         if self._controller.is_recording():
             save_path = self._prompt_recording_output_path()
             if save_path is None:
-                self._set_status("Debes elegir destino para guardar la grabación antes de detener.", "warning")
+                self._set_status(self._tr("warn_choose_recording_path"), "warning")
                 return
 
             def stop_recording() -> None:
                 self._controller.stop_recording(output_path=save_path)
 
             self._run_in_background(
-                action_label="Deteniendo grabación",
+                action_label=self._tr("action_stop_recording"),
                 fn=stop_recording,
-                success_status="Grabación detenida.",
+                success_status=self._tr("success_stop_recording"),
                 busy=False,
             )
             return
 
         if not self._controller.is_running() and self._selected_device_mode() == DEVICE_MODE_IPHONE:
-            self._set_status("Inicia el receptor de iPhone antes de grabar.", "warning")
+            self._set_status(self._tr("status_start_receiver_before_record"), "warning")
             return
 
         if self._selected_device_mode() != DEVICE_MODE_IPHONE:
-            self._set_status("La grabación de video solo está habilitada para la ventana UxPlay (modo iPhone).", "warning")
+            self._set_status(self._tr("status_recording_only_iphone"), "warning")
             return
 
         started_at = datetime.now()
@@ -839,16 +976,16 @@ class MainWindow:
             )
 
         self._run_in_background(
-            action_label="Iniciando grabación",
+            action_label=self._tr("action_start_recording"),
             fn=start_recording,
-            success_status="Grabación iniciada.",
+            success_status=self._tr("success_start_recording"),
             busy=False,
         )
 
     def _suggest_recording_name(self) -> str:
         if self._record_suggested_name:
             return self._record_suggested_name
-        return f"grabacion_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+        return self._tr("initial_record_name", timestamp=datetime.now().strftime("%Y%m%d_%H%M%S"))
 
     def _default_recording_output_path(self) -> Path:
         documents = Path.home() / "Documents"
@@ -857,7 +994,7 @@ class MainWindow:
 
     def _prompt_recording_output_path(self) -> Path | None:
         selected = filedialog.asksaveasfilename(
-            title="Guardar grabación",
+            title=self._tr("title_save_recording"),
             defaultextension=".mp4",
             filetypes=[("Video MP4", "*.mp4"), ("Todos los archivos", "*.*")],
             initialfile=self._suggest_recording_name(),
@@ -873,7 +1010,7 @@ class MainWindow:
         try:
             return shlex.split(text, posix=False)
         except ValueError as exc:
-            raise ValueError(f"Sintaxis inválida en argumentos extras: {exc}") from exc
+            raise ValueError(self._tr("error_invalid_extra_args", error=exc)) from exc
     def _poll_events(self) -> None:
         if self._closing:
             return
@@ -891,9 +1028,9 @@ class MainWindow:
                         self._controller.stop_recording(output_path=auto_save_path)
 
                     self._run_in_background(
-                        action_label="Deteniendo grabación por parada de receptor",
+                        action_label=self._tr("action_stop_recording_due_receiver_stop"),
                         fn=stop_due_to_receiver_stop,
-                        success_status=f"Grabación detenida junto al receptor. Archivo: {auto_save_path}",
+                        success_status=self._tr("success_stop_recording_due_receiver_stop", path=auto_save_path),
                         busy=False,
                     )
             elif event.kind == "recording":
@@ -907,68 +1044,69 @@ class MainWindow:
             self._ntp_error_count = 0
             self._ntp_hint_shown = False
         if "initialized server socket(s)" in low:
-            self._set_status("Receptor listo para conectar desde iPhone.", "success")
+            self._set_status(self._tr("status_receiver_ready_connect"), "success")
         if "raop_rtp_mirror starting mirroring" in low:
-            self._set_status("Conexión AirPlay establecida. Abriendo ventana de video...", "info")
+            self._set_status(self._tr("status_airplay_connected"), "info")
         if "reiniciando receptor automáticamente" in low or "reiniciando receptor automaticamente" in low:
-            self._set_status("Recuperando primer enlace AirPlay automáticamente...", "warning")
+            self._set_status(self._tr("status_recovering_first_link"), "warning")
         if "receptor reiniciado automáticamente" in low or "receptor reiniciado automaticamente" in low:
-            self._set_status("Receptor recuperado. Intenta conectar de nuevo si estaba en espera.", "success")
+            self._set_status(self._tr("status_receiver_recovered"), "success")
         if "gstreamer error: output window was closed" in low:
-            self._append_log("[ADVERTENCIA] UxPlay cerró la ventana de video. Se recomienda usar perfil de render estable.")
-            self._set_status("La ventana de video se cerró; cambiando a perfil estable recomendado.", "warning")
+            self._append_log(self._tr("warn_uxplay_window_closed"))
+            self._set_status(self._tr("status_uxplay_window_closed"), "warning")
         if "invalid ntp_time < gst_video_pipeline_base_time" in low:
             self._ntp_error_count += 1
         if self._ntp_error_count >= 8 and not self._ntp_hint_shown:
             self._ntp_hint_shown = True
-            self._append_log("[PISTA] Se detectó desfase NTP. Sincroniza el reloj de Windows.")
-            self._set_status("Posible desfase NTP detectado.", "warning")
+            self._append_log(self._tr("hint_ntp_skew"))
+            self._set_status(self._tr("status_ntp_skew"), "warning")
 
     def _set_running_state(self, running: bool) -> None:
         if self._selected_device_mode() == DEVICE_MODE_ANDROID:
-            self._receiver_status_var.set("Receptor: modo Android")
-            self._btn_receiver.configure(text="Abrir proyección Android", underline=0, style="Primary.TButton")
+            self._receiver_status_var.set(self._tr("receiver_status_android"))
+            self._btn_receiver.configure(text=self._tr("btn_open_android_projection"), underline=0, style="Primary.TButton")
             self._pill_receiver.configure(bg="#1d304d", fg="#9fc9ff", highlightbackground="#365c8f")
             return
 
         if running:
-            self._receiver_status_var.set("Receptor: activo")
-            self._btn_receiver.configure(text="Detener receptor", underline=0, style="Danger.TButton")
+            self._receiver_status_var.set(self._tr("receiver_status_running"))
+            self._btn_receiver.configure(text=self._tr("btn_stop_receiver"), underline=0, style="Danger.TButton")
             self._pill_receiver.configure(bg="#103026", fg="#72f2de", highlightbackground="#18c3ae")
-            self._set_status("Receptor activo.", "success")
+            self._set_status(self._tr("status_receiver_running"), "success")
             return
 
-        self._receiver_status_var.set("Receptor: detenido")
-        self._btn_receiver.configure(text="Iniciar receptor", underline=0, style="Primary.TButton")
+        self._receiver_status_var.set(self._tr("receiver_status_stopped"))
+        self._btn_receiver.configure(text=self._tr("btn_start_receiver"), underline=0, style="Primary.TButton")
         self._pill_receiver.configure(bg="#2b1620", fg="#ff8aa0", highlightbackground="#cc2a56")
-        self._set_status("Receptor detenido.", "info")
+        self._set_status(self._tr("status_receiver_stopped_short"), "info")
 
     def _set_record_state(self, recording: bool) -> None:
         if recording:
-            self._record_status_var.set("Grabación: activa")
-            self._btn_record.configure(text="Detener grabación", underline=0, style="Danger.TButton")
+            self._record_status_var.set(self._tr("record_status_active"))
+            self._btn_record.configure(text=self._tr("btn_stop_recording"), underline=0, style="Danger.TButton")
             self._pill_record.configure(bg="#3a1424", fg="#ff8cad", highlightbackground="#cf2f61")
-            self._set_status("Grabación activa.", "success")
+            self._set_status(self._tr("status_recording_running"), "success")
             return
 
         self._record_suggested_name = None
-        self._record_status_var.set("Grabación: inactiva")
-        self._btn_record.configure(text="Grabar", underline=0, style="Danger.TButton")
+        self._record_status_var.set(self._tr("record_status_inactive"))
+        self._btn_record.configure(text=self._tr("btn_record"), underline=0, style="Danger.TButton")
         self._pill_record.configure(bg="#1d304d", fg="#9fc9ff", highlightbackground="#365c8f")
 
     def _append_log(self, message: str) -> None:
-        line = f"[{datetime.now().strftime('%H:%M:%S')}] {message}\n"
-        low = message.lower()
+        localized_message = localize_log(self._language_code, message)
+        line = f"[{datetime.now().strftime('%H:%M:%S')}] {localized_message}\n"
+        low = localized_message.lower()
         tag = ""
         if "error" in low:
             tag = "error"
-            self._set_status(message, "error")
-        elif "advertencia" in low:
+            self._set_status(localized_message, "error")
+        elif "advertencia" in low or "warning" in low:
             tag = "warning"
-            self._set_status(message, "warning")
-        elif "pista" in low:
+            self._set_status(localized_message, "warning")
+        elif "pista" in low or "hint" in low:
             tag = "hint"
-        elif "grabación" in low or message.startswith("[REC]"):
+        elif "grabación" in low or "grabacion" in low or "recording" in low or localized_message.startswith("[REC]"):
             tag = "recording"
 
         self._log_box.configure(state="normal")
@@ -976,6 +1114,9 @@ class MainWindow:
             self._log_box.insert("end", line, tag)
         else:
             self._log_box.insert("end", line)
+        self._log_history.append((line, tag))
+        if len(self._log_history) > 800:
+            self._log_history = self._log_history[-800:]
         self._log_box.see("end")
         self._log_box.configure(state="disabled")
 
@@ -983,7 +1124,8 @@ class MainWindow:
         self._log_box.configure(state="normal")
         self._log_box.delete("1.0", "end")
         self._log_box.configure(state="disabled")
-        self._set_status("Registros limpiados.", "info")
+        self._log_history.clear()
+        self._set_status(self._tr("logs_cleared"), "info")
 
     def _show_about_dialog(self) -> None:
         if self._about_dialog is not None and self._about_dialog.winfo_exists():
@@ -991,10 +1133,10 @@ class MainWindow:
             return
 
         year = datetime.now().year
-        text = f"Versión {self._app_version} creado por Synyster Rick, {year} Derechos Reservados"
+        text = self._tr("about_text", version=self._app_version, year=year)
 
         dialog = tk.Toplevel(self._root)
-        dialog.title("Acerca de")
+        dialog.title(self._tr("about_title"))
         dialog.resizable(False, False)
         dialog.transient(self._root)
         dialog.grab_set()
@@ -1012,7 +1154,7 @@ class MainWindow:
             wraplength=380,
             justify="left",
         ).pack(anchor="w", pady=(6, 12))
-        ttk.Button(container, text="Cerrar", command=dialog.destroy).pack(anchor="e")
+        ttk.Button(container, text=self._tr("about_close"), command=dialog.destroy).pack(anchor="e")
 
         dialog.bind("<Escape>", lambda _e: dialog.destroy())
         dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
@@ -1021,7 +1163,7 @@ class MainWindow:
     def _set_status(self, message: str, level: str) -> None:
         clean = " ".join(message.strip().split())
         if not clean:
-            clean = "Listo."
+            clean = self._tr("status_default")
 
         palette = {
             "info": "#9bd8ff",
@@ -1045,7 +1187,7 @@ class MainWindow:
 
         if busy:
             self._set_busy_state(True)
-        self._set_status(f"{action_label}...", "info")
+        self._set_status(self._tr("status_action_in_progress", action_label=action_label), "info")
 
         def worker() -> None:
             try:
@@ -1062,7 +1204,7 @@ class MainWindow:
 
     def _on_background_error(self, action_label: str, exc: Exception) -> None:
         self._append_log(f"[ERROR] {exc}")
-        self._set_status(f"{action_label} falló: {exc}", "error")
+        self._set_status(self._tr("status_action_failed", action_label=action_label, error=exc), "error")
 
     def _set_busy_state(self, busy: bool) -> None:
         if busy:
@@ -1120,7 +1262,7 @@ class MainWindow:
             self._root.after_cancel(self._save_after_id)
             self._save_after_id = None
         self._save_config()
-        self._set_status("Cerrando aplicación...", "info")
+        self._set_status(self._tr("status_app_closing"), "info")
 
         def shutdown() -> None:
             try:

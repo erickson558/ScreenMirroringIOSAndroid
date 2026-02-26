@@ -1,0 +1,332 @@
+from __future__ import annotations
+
+from collections.abc import Mapping
+
+LANGUAGE_ES = "es"
+LANGUAGE_EN = "en"
+SUPPORTED_LANGUAGES = (LANGUAGE_ES, LANGUAGE_EN)
+
+LANGUAGE_LABELS: Mapping[str, str] = {
+    LANGUAGE_ES: "Español",
+    LANGUAGE_EN: "English",
+}
+
+_MESSAGES: dict[str, dict[str, str]] = {
+    LANGUAGE_ES: {
+        "window_title": "{app_name} - Studio Neon",
+        "header_title": "{app_name}  |  iPhone AirPlay + Android Proyección inalámbrica",
+        "header_mode": "Modo cine en vivo",
+        "btn_start_receiver": "Iniciar receptor",
+        "btn_stop_receiver": "Detener receptor",
+        "btn_open_android_projection": "Abrir proyección Android",
+        "btn_snapshot": "Captura",
+        "btn_record": "Grabar",
+        "btn_stop_recording": "Detener grabación",
+        "btn_exit": "Salir",
+        "btn_browse": "Examinar...",
+        "btn_clear_logs": "Borrar registros",
+        "card_receiver_config": "Configuración del receptor",
+        "card_stream_latency": "Transmisión y latencia",
+        "card_capture_record": "Captura y grabación",
+        "card_runtime_logs": "Registros de ejecución",
+        "lbl_receiver_name": "Nombre visible en iPhone",
+        "chk_append_hostname": "Agregar @equipo al nombre visible",
+        "lbl_uxplay_path": "Ruta de UxPlay",
+        "lbl_device": "Dispositivo",
+        "device_iphone": "iPhone (AirPlay)",
+        "device_android": "Android (Proyección inalámbrica)",
+        "device_hint_iphone": "Usa AirPlay con UxPlay para espejo de pantalla y audio.",
+        "device_hint_android": (
+            "Usa Miracast/Proyección inalámbrica. En el teléfono: Cast, Smart View o "
+            "Proyección inalámbrica y selecciona este PC."
+        ),
+        "lbl_profile": "Perfil",
+        "lbl_extra_args": "Args extras",
+        "lbl_source": "Fuente",
+        "source_desktop": "Escritorio (recomendado)",
+        "source_window": "Ventana de UxPlay",
+        "lbl_window_title": "Título de ventana (Direct3D11 renderer)",
+        "lbl_capture_fps": "FPS de grabación",
+        "menu_file": "Archivo",
+        "menu_help": "Ayuda",
+        "menu_language": "Idioma",
+        "menu_exit": "Salir",
+        "menu_about": "Acerca de",
+        "menu_language_es": "Español",
+        "menu_language_en": "English",
+        "receiver_status_stopped": "Receptor: detenido",
+        "receiver_status_running": "Receptor: activo",
+        "receiver_status_android": "Receptor: modo Android",
+        "record_status_active": "Grabación: activa",
+        "record_status_inactive": "Grabación: inactiva",
+        "status_ready": "Listo. {app_name} v{version}",
+        "status_app_closing": "Cerrando aplicación...",
+        "version_label": "Versión {version}",
+        "app_initialized": "Aplicación inicializada.",
+        "about_title": "Acerca de",
+        "about_text": "Versión {version} creado por Synyster Rick, {year} Derechos Reservados",
+        "about_close": "Cerrar",
+        "status_mode_iphone": "Modo iPhone activo.",
+        "status_mode_android": "Modo Android activo.",
+        "log_mode_iphone": "Modo de dispositivo: iPhone (AirPlay).",
+        "log_mode_android": "Modo de dispositivo: Android (Proyección inalámbrica).",
+        "log_switch_to_android": "[PISTA] Cambio a Android: se detiene el receptor de iPhone automáticamente.",
+        "action_stop_receiver_iphone": "Deteniendo receptor de iPhone",
+        "success_stop_receiver_iphone": "Receptor de iPhone detenido.",
+        "action_diagnose_android": "Analizando compatibilidad Miracast",
+        "success_diagnose_android": "Diagnóstico Android completado.",
+        "status_wait_current_operation": "Espera a que finalice la operación actual.",
+        "title_pick_uxplay": "Selecciona el ejecutable de UxPlay",
+        "status_uxplay_path_updated": "Ruta de UxPlay actualizada.",
+        "status_operation_in_progress": "Ya hay una operación en curso. Espera un momento.",
+        "action_stop_receiver": "Deteniendo receptor",
+        "success_receiver_stopped": "Receptor detenido.",
+        "error_missing_uxplay_path": "Falta la ruta de UxPlay.",
+        "profile_args_log": "Perfil: {profile_label} | Args: {args}",
+        "args_none": "(sin argumentos)",
+        "suffix_with_host": "con sufijo @equipo",
+        "suffix_without_host": "sin sufijo @equipo",
+        "action_start_receiver": "Iniciando receptor",
+        "success_start_receiver": "Receptor iniciándose con nombre: {name} ({suffix_mode})",
+        "action_open_android_projection": "Abriendo proyección Android",
+        "success_open_android_projection": "Configuración de Proyección Android abierta.",
+        "hint_wireless_display": "[PISTA] Wireless Display: {capability}",
+        "hint_miracast_diag": "[PISTA] Diagnóstico Miracast: {line}",
+        "warn_wireless_display_missing": "[ADVERTENCIA] La característica opcional 'Wireless Display' no está instalada.",
+        "status_install_wireless_display": "Instala 'Wireless Display' en Windows y reinicia.",
+        "warn_miracast_not_supported": "[ADVERTENCIA] Este equipo no admite recibir Miracast.",
+        "status_miracast_not_supported": "Este equipo no admite recibir Miracast.",
+        "hint_android_ready": "[PISTA] Android activo. Pulsa 'Abrir proyección Android'.",
+        "status_android_ready": "Android listo para proyección inalámbrica.",
+        "hint_receiver_stopped_snapshot": "[PISTA] El receptor está detenido. Se capturará el escritorio igualmente.",
+        "status_receiver_stopped_snapshot": "Receptor detenido: captura desde escritorio.",
+        "title_save_snapshot": "Guardar captura",
+        "initial_snapshot_name": "captura_{timestamp}.png",
+        "action_take_snapshot": "Tomando captura",
+        "success_snapshot": "Captura completada.",
+        "warn_choose_recording_path": "Debes elegir destino para guardar la grabación antes de detener.",
+        "action_stop_recording": "Deteniendo grabación",
+        "success_stop_recording": "Grabación detenida.",
+        "status_start_receiver_before_record": "Inicia el receptor de iPhone antes de grabar.",
+        "status_recording_only_iphone": "La grabación de video solo está habilitada para la ventana UxPlay (modo iPhone).",
+        "initial_record_name": "grabacion_{timestamp}.mp4",
+        "title_save_recording": "Guardar grabación",
+        "action_start_recording": "Iniciando grabación",
+        "success_start_recording": "Grabación iniciada.",
+        "error_invalid_extra_args": "Sintaxis inválida en argumentos extras: {error}",
+        "action_stop_recording_due_receiver_stop": "Deteniendo grabación por parada de receptor",
+        "success_stop_recording_due_receiver_stop": "Grabación detenida junto al receptor. Archivo: {path}",
+        "status_receiver_ready_connect": "Receptor listo para conectar desde iPhone.",
+        "status_airplay_connected": "Conexión AirPlay establecida. Abriendo ventana de video...",
+        "status_recovering_first_link": "Recuperando primer enlace AirPlay automáticamente...",
+        "status_receiver_recovered": "Receptor recuperado. Intenta conectar de nuevo si estaba en espera.",
+        "warn_uxplay_window_closed": "[ADVERTENCIA] UxPlay cerró la ventana de video. Se recomienda usar perfil de render estable.",
+        "status_uxplay_window_closed": "La ventana de video se cerró; cambiando a perfil estable recomendado.",
+        "hint_ntp_skew": "[PISTA] Se detectó desfase NTP. Sincroniza el reloj de Windows.",
+        "status_ntp_skew": "Posible desfase NTP detectado.",
+        "status_receiver_running": "Receptor activo.",
+        "status_receiver_stopped_short": "Receptor detenido.",
+        "status_recording_running": "Grabación activa.",
+        "logs_cleared": "Registros limpiados.",
+        "status_default": "Listo.",
+        "status_action_failed": "{action_label} falló: {error}",
+        "status_action_in_progress": "{action_label}...",
+        "warn_save_config_failed": "[ADVERTENCIA] No se pudo guardar config.json: {error}",
+        "status_save_config_failed": "No se pudo guardar config.json: {error}",
+        "lang_changed_log": "[PISTA] Idioma cambiado a {language_label}.",
+    },
+    LANGUAGE_EN: {
+        "window_title": "{app_name} - Studio Neon",
+        "header_title": "{app_name}  |  iPhone AirPlay + Android Wireless Projection",
+        "header_mode": "Live cinema mode",
+        "btn_start_receiver": "Start receiver",
+        "btn_stop_receiver": "Stop receiver",
+        "btn_open_android_projection": "Open Android projection",
+        "btn_snapshot": "Snapshot",
+        "btn_record": "Record",
+        "btn_stop_recording": "Stop recording",
+        "btn_exit": "Exit",
+        "btn_browse": "Browse...",
+        "btn_clear_logs": "Clear logs",
+        "card_receiver_config": "Receiver settings",
+        "card_stream_latency": "Streaming and latency",
+        "card_capture_record": "Capture and recording",
+        "card_runtime_logs": "Runtime logs",
+        "lbl_receiver_name": "Visible name on iPhone",
+        "chk_append_hostname": "Append @hostname to visible name",
+        "lbl_uxplay_path": "UxPlay path",
+        "lbl_device": "Device",
+        "device_iphone": "iPhone (AirPlay)",
+        "device_android": "Android (Wireless Projection)",
+        "device_hint_iphone": "Use AirPlay with UxPlay for screen mirroring and audio.",
+        "device_hint_android": (
+            "Use Miracast/Wireless Projection. On the phone: Cast, Smart View, or "
+            "Wireless Projection and pick this PC."
+        ),
+        "lbl_profile": "Profile",
+        "lbl_extra_args": "Extra args",
+        "lbl_source": "Source",
+        "source_desktop": "Desktop (recommended)",
+        "source_window": "UxPlay window",
+        "lbl_window_title": "Window title (Direct3D11 renderer)",
+        "lbl_capture_fps": "Recording FPS",
+        "menu_file": "File",
+        "menu_help": "Help",
+        "menu_language": "Language",
+        "menu_exit": "Exit",
+        "menu_about": "About",
+        "menu_language_es": "Spanish",
+        "menu_language_en": "English",
+        "receiver_status_stopped": "Receiver: stopped",
+        "receiver_status_running": "Receiver: running",
+        "receiver_status_android": "Receiver: Android mode",
+        "record_status_active": "Recording: active",
+        "record_status_inactive": "Recording: idle",
+        "status_ready": "Ready. {app_name} v{version}",
+        "status_app_closing": "Closing application...",
+        "version_label": "Version {version}",
+        "app_initialized": "Application initialized.",
+        "about_title": "About",
+        "about_text": "Version {version} created by Synyster Rick, {year} All Rights Reserved",
+        "about_close": "Close",
+        "status_mode_iphone": "iPhone mode active.",
+        "status_mode_android": "Android mode active.",
+        "log_mode_iphone": "Device mode: iPhone (AirPlay).",
+        "log_mode_android": "Device mode: Android (Wireless Projection).",
+        "log_switch_to_android": "[HINT] Switched to Android: iPhone receiver will stop automatically.",
+        "action_stop_receiver_iphone": "Stopping iPhone receiver",
+        "success_stop_receiver_iphone": "iPhone receiver stopped.",
+        "action_diagnose_android": "Analyzing Miracast compatibility",
+        "success_diagnose_android": "Android diagnostics completed.",
+        "status_wait_current_operation": "Wait for the current operation to finish.",
+        "title_pick_uxplay": "Select UxPlay executable",
+        "status_uxplay_path_updated": "UxPlay path updated.",
+        "status_operation_in_progress": "An operation is already in progress. Please wait.",
+        "action_stop_receiver": "Stopping receiver",
+        "success_receiver_stopped": "Receiver stopped.",
+        "error_missing_uxplay_path": "UxPlay path is missing.",
+        "profile_args_log": "Profile: {profile_label} | Args: {args}",
+        "args_none": "(no arguments)",
+        "suffix_with_host": "with @hostname suffix",
+        "suffix_without_host": "without @hostname suffix",
+        "action_start_receiver": "Starting receiver",
+        "success_start_receiver": "Receiver starting with name: {name} ({suffix_mode})",
+        "action_open_android_projection": "Opening Android projection",
+        "success_open_android_projection": "Android Projection settings opened.",
+        "hint_wireless_display": "[HINT] Wireless Display: {capability}",
+        "hint_miracast_diag": "[HINT] Miracast diagnostics: {line}",
+        "warn_wireless_display_missing": "[WARNING] Optional feature 'Wireless Display' is not installed.",
+        "status_install_wireless_display": "Install 'Wireless Display' in Windows and restart.",
+        "warn_miracast_not_supported": "[WARNING] This PC cannot receive Miracast.",
+        "status_miracast_not_supported": "This PC cannot receive Miracast.",
+        "hint_android_ready": "[HINT] Android mode active. Click 'Open Android projection'.",
+        "status_android_ready": "Android ready for wireless projection.",
+        "hint_receiver_stopped_snapshot": "[HINT] Receiver is stopped. Desktop will still be captured.",
+        "status_receiver_stopped_snapshot": "Receiver stopped: capturing desktop.",
+        "title_save_snapshot": "Save snapshot",
+        "initial_snapshot_name": "snapshot_{timestamp}.png",
+        "action_take_snapshot": "Taking snapshot",
+        "success_snapshot": "Snapshot completed.",
+        "warn_choose_recording_path": "Choose destination file before stopping recording.",
+        "action_stop_recording": "Stopping recording",
+        "success_stop_recording": "Recording stopped.",
+        "status_start_receiver_before_record": "Start iPhone receiver before recording.",
+        "status_recording_only_iphone": "Video recording is only available for UxPlay window (iPhone mode).",
+        "initial_record_name": "recording_{timestamp}.mp4",
+        "title_save_recording": "Save recording",
+        "action_start_recording": "Starting recording",
+        "success_start_recording": "Recording started.",
+        "error_invalid_extra_args": "Invalid syntax in extra args: {error}",
+        "action_stop_recording_due_receiver_stop": "Stopping recording because receiver stopped",
+        "success_stop_recording_due_receiver_stop": "Recording stopped with receiver. File: {path}",
+        "status_receiver_ready_connect": "Receiver ready to connect from iPhone.",
+        "status_airplay_connected": "AirPlay connection established. Opening video window...",
+        "status_recovering_first_link": "Recovering first AirPlay link automatically...",
+        "status_receiver_recovered": "Receiver recovered. Reconnect if needed.",
+        "warn_uxplay_window_closed": "[WARNING] UxPlay closed the video window. Stable rendering profile is recommended.",
+        "status_uxplay_window_closed": "Video window closed; switching to recommended stable profile.",
+        "hint_ntp_skew": "[HINT] NTP drift detected. Sync Windows clock.",
+        "status_ntp_skew": "Possible NTP drift detected.",
+        "status_receiver_running": "Receiver running.",
+        "status_receiver_stopped_short": "Receiver stopped.",
+        "status_recording_running": "Recording active.",
+        "logs_cleared": "Logs cleared.",
+        "status_default": "Ready.",
+        "status_action_failed": "{action_label} failed: {error}",
+        "status_action_in_progress": "{action_label}...",
+        "warn_save_config_failed": "[WARNING] Could not save config.json: {error}",
+        "status_save_config_failed": "Could not save config.json: {error}",
+        "lang_changed_log": "[HINT] Language changed to {language_label}.",
+    },
+}
+
+_LOG_REPLACEMENTS_EN: tuple[tuple[str, str], ...] = (
+    ("[ADVERTENCIA]", "[WARNING]"),
+    ("[PISTA]", "[HINT]"),
+    ("Iniciando receptor:", "Starting receiver:"),
+    ("Deteniendo receptor...", "Stopping receiver..."),
+    ("Deteniendo grabación...", "Stopping recording..."),
+    ("Deteniendo grabacion...", "Stopping recording..."),
+    ("Grabación iniciada:", "Recording started:"),
+    ("Grabacion iniciada:", "Recording started:"),
+    ("Grabación guardada:", "Recording saved:"),
+    ("Grabacion guardada:", "Recording saved:"),
+    ("Grabación finalizada", "Recording completed"),
+    ("Grabacion finalizada", "Recording completed"),
+    ("Estado del receptor: activo", "Receiver status: running"),
+    ("Estado del receptor: detenido", "Receiver status: stopped"),
+    ("Estado de grabacion: grabando", "Recording status: recording"),
+    ("Estado de grabacion: inactiva", "Recording status: idle"),
+    ("El proceso del receptor finalizo con codigo", "Receiver process exited with code"),
+    ("La captura falló:", "Snapshot failed:"),
+    ("La captura fallo:", "Snapshot failed:"),
+    ("La grabacion no pudo iniciar:", "Recording could not start:"),
+    ("No se encontro la ventana de UxPlay.", "UxPlay window was not found."),
+    ("No se pudo iniciar la grabacion.", "Recording could not be started."),
+    ("No se encontró ffmpeg.exe junto al runtime de UxPlay.", "ffmpeg.exe was not found near UxPlay runtime."),
+)
+
+
+def normalize_language(value: object) -> str:
+    language = str(value or "").strip().lower()
+    if language in SUPPORTED_LANGUAGES:
+        return language
+    return LANGUAGE_ES
+
+
+def tr(language: str, key: str, **kwargs: object) -> str:
+    lang = normalize_language(language)
+    catalog = _MESSAGES.get(lang, _MESSAGES[LANGUAGE_ES])
+    template = catalog.get(key) or _MESSAGES[LANGUAGE_ES].get(key) or key
+    if not kwargs:
+        return template
+    return template.format(**kwargs)
+
+
+def localize_log(language: str, message: str) -> str:
+    normalized = _repair_mojibake(message)
+    if normalize_language(language) != LANGUAGE_EN:
+        return normalized
+
+    translated = normalized
+    for source, target in _LOG_REPLACEMENTS_EN:
+        translated = translated.replace(source, target)
+    return translated
+
+
+def _repair_mojibake(message: str) -> str:
+    if "\u00c3" not in message and "\u00c2" not in message:
+        return message
+
+    normalized = message
+    for _ in range(2):
+        try:
+            repaired = normalized.encode("latin-1").decode("utf-8")
+        except UnicodeError:
+            break
+        if repaired == normalized:
+            break
+        normalized = repaired
+        if "\u00c3" not in normalized and "\u00c2" not in normalized:
+            break
+    return normalized
