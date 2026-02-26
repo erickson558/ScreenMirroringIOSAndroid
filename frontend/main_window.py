@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from datetime import datetime
+import math
 from pathlib import Path
 import shlex
 import tempfile
@@ -71,7 +72,7 @@ class MainWindow:
             value=self._safe_bool(saved.get("append_hostname_suffix", False), False)
         )
         self._capture_source_var = tk.StringVar(value=initial_source)
-        self._capture_title_var = tk.StringVar(value=str(saved.get("capture_window_title", "UxPlay")))
+        self._capture_title_var = tk.StringVar(value=str(saved.get("capture_window_title", "Direct3D11 renderer")))
         self._capture_fps_var = tk.IntVar(value=self._safe_int(saved.get("capture_fps", 30), 30))
         self._device_mode_var = tk.StringVar(value=initial_mode)
         self._device_hint_var = tk.StringVar(value=self._device_by_key[initial_mode].description)
@@ -85,6 +86,9 @@ class MainWindow:
         self._ntp_error_count = 0
         self._ntp_hint_shown = False
         self._record_suggested_name: str | None = None
+        self._animation_after_id: str | None = None
+        self._animation_phase = 0.0
+        self._intro_alpha = 1.0
         self._busy_count = 0
         self._closing = False
         self._about_dialog: tk.Toplevel | None = None
@@ -97,61 +101,62 @@ class MainWindow:
         self._apply_saved_geometry(str(saved.get("window_geometry", "")))
         self._install_autosave()
         self._bind_hotkeys()
+        self._start_intro_animation()
 
         self._root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._root.after(self.POLL_INTERVAL_MS, self._poll_events)
 
     def _build_ui(self) -> None:
-        self._root.title(f"{self._app_name} - Estudio Aero")
+        self._root.title(f"{self._app_name} - Studio Neon")
         self._root.geometry("1120x720")
         self._root.minsize(960, 620)
-        self._root.configure(bg="#060b16")
+        self._root.configure(bg="#050814")
 
         self._build_menu()
 
         style = ttk.Style(self._root)
         style.theme_use("clam")
-        style.configure("Root.TFrame", background="#060b16")
-        style.configure("Card.TLabelframe", background="#101b2b", borderwidth=1, relief="solid")
+        style.configure("Root.TFrame", background="#050814")
+        style.configure("Card.TLabelframe", background="#0e1a2a", borderwidth=1, relief="flat")
         style.configure(
             "Card.TLabelframe.Label",
-            background="#101b2b",
-            foreground="#67e8f9",
-            font=("Bahnschrift SemiBold", 10),
+            background="#0e1a2a",
+            foreground="#64d8ff",
+            font=("Segoe UI Semibold", 10),
         )
-        style.configure("Card.TLabel", background="#101b2b", foreground="#d7e6ff", font=("Bahnschrift", 10))
-        style.configure("Hint.TLabel", background="#101b2b", foreground="#87a7d6", font=("Bahnschrift", 9))
+        style.configure("Card.TLabel", background="#0e1a2a", foreground="#d8e7ff", font=("Segoe UI", 10))
+        style.configure("Hint.TLabel", background="#0e1a2a", foreground="#89a8d8", font=("Segoe UI", 9))
         style.configure(
             "Primary.TButton",
-            font=("Bahnschrift SemiBold", 10),
+            font=("Segoe UI Semibold", 10),
             foreground="#03121c",
-            background="#2dd4bf",
-            padding=(12, 8),
+            background="#3fe6c8",
+            padding=(14, 9),
             borderwidth=0,
         )
         style.configure(
             "Glass.TButton",
-            font=("Bahnschrift SemiBold", 9),
+            font=("Segoe UI Semibold", 9),
             foreground="#d9e9ff",
-            background="#1c2c47",
-            padding=(10, 6),
+            background="#1b2f4d",
+            padding=(11, 7),
             borderwidth=0,
         )
         style.configure(
             "Danger.TButton",
-            font=("Bahnschrift SemiBold", 10),
+            font=("Segoe UI Semibold", 10),
             foreground="#ffffff",
             background="#e11d48",
-            padding=(12, 8),
+            padding=(14, 9),
             borderwidth=0,
         )
         style.map(
             "Primary.TButton",
-            background=[("active", "#5eead4"), ("pressed", "#14b8a6")],
+            background=[("active", "#73efd5"), ("pressed", "#1bb9a4")],
         )
         style.map(
             "Glass.TButton",
-            background=[("active", "#24395b"), ("pressed", "#17243b")],
+            background=[("active", "#264263"), ("pressed", "#16283e")],
         )
         style.map(
             "Danger.TButton",
@@ -159,12 +164,12 @@ class MainWindow:
         )
         style.configure(
             "Card.TRadiobutton",
-            background="#101b2b",
+            background="#0e1a2a",
             foreground="#d7e6ff",
-            font=("Bahnschrift SemiBold", 9),
+            font=("Segoe UI Semibold", 9),
         )
-        style.configure("Status.TLabel", background="#060b16", foreground="#9bd8ff", font=("Bahnschrift", 9))
-        style.configure("Version.TLabel", background="#060b16", foreground="#67e8f9", font=("Bahnschrift SemiBold", 9))
+        style.configure("Status.TLabel", background="#050814", foreground="#9bd8ff", font=("Segoe UI", 9))
+        style.configure("Version.TLabel", background="#050814", foreground="#67e8f9", font=("Segoe UI Semibold", 9))
         style.configure("TEntry", fieldbackground="#0e1a2c", foreground="#d7e6ff")
         style.configure("TCombobox", fieldbackground="#0e1a2c", foreground="#d7e6ff")
 
@@ -172,16 +177,24 @@ class MainWindow:
         root.pack(fill="both", expand=True)
 
         header_wrap = ttk.Frame(root, style="Root.TFrame")
-        header_wrap.pack(fill="x", pady=(0, 12))
+        header_wrap.pack(fill="x", pady=(0, 10))
 
-        header = ttk.Label(
+        self._header_label = ttk.Label(
             header_wrap,
             text=f"{self._app_name}  |  iPhone AirPlay + Android Proyección inalámbrica",
-            font=("Bahnschrift SemiBold", 18),
-            foreground="#84ccff",
-            background="#060b16",
+            font=("Segoe UI Semibold", 18),
+            foreground="#8bd4ff",
+            background="#050814",
         )
-        header.pack(side="left", anchor="w")
+        self._header_label.pack(side="left", anchor="w")
+
+        ttk.Label(
+            header_wrap,
+            text="Modo cine en vivo",
+            font=("Segoe UI", 10),
+            foreground="#89a8d8",
+            background="#050814",
+        ).pack(side="left", padx=(10, 0), anchor="s")
 
         header_version = ttk.Label(
             header_wrap,
@@ -229,26 +242,28 @@ class MainWindow:
         self._pill_receiver = tk.Label(
             top,
             textvariable=self._receiver_status_var,
-            font=("Bahnschrift SemiBold", 9),
-            padx=10,
-            pady=4,
-            bd=1,
-            relief="solid",
-            bg="#13243b",
-            fg="#8cc8ff",
+            font=("Segoe UI Semibold", 9),
+            padx=12,
+            pady=5,
+            bd=0,
+            relief="flat",
+            bg="#12253d",
+            fg="#9ad6ff",
+            highlightthickness=1,
             highlightbackground="#345a86",
         )
         self._pill_receiver.pack(side="right")
         self._pill_record = tk.Label(
             top,
             textvariable=self._record_status_var,
-            font=("Bahnschrift SemiBold", 9),
-            padx=10,
-            pady=4,
-            bd=1,
-            relief="solid",
-            bg="#13243b",
-            fg="#8cc8ff",
+            font=("Segoe UI Semibold", 9),
+            padx=12,
+            pady=5,
+            bd=0,
+            relief="flat",
+            bg="#12253d",
+            fg="#9ad6ff",
+            highlightthickness=1,
             highlightbackground="#345a86",
         )
         self._pill_record.pack(side="right", padx=(0, 8))
@@ -397,7 +412,12 @@ class MainWindow:
         )
         self._combo_capture_source.grid(row=0, column=1, columnspan=2, sticky="ew", pady=(0, 8))
 
-        ttk.Label(card, text="Título de ventana", underline=2, style="Card.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 8))
+        ttk.Label(
+            card,
+            text="Título de ventana (Direct3D11 renderer)",
+            underline=2,
+            style="Card.TLabel",
+        ).grid(row=1, column=0, sticky="w", padx=(0, 8))
         self._entry_capture_title = ttk.Entry(card, textvariable=self._capture_title_var)
         self._entry_capture_title.grid(row=1, column=1, columnspan=2, sticky="ew", pady=(0, 8))
 
@@ -429,6 +449,49 @@ class MainWindow:
         self._root.bind_all("<Alt-e>", lambda _e: self._shortcut(self._toggle_hostname_suffix))
         self._root.bind_all("<Alt-o>", lambda _e: self._shortcut(self._show_about_dialog))
         self._root.bind_all("<F1>", lambda _e: self._shortcut(self._show_about_dialog))
+
+    def _start_intro_animation(self) -> None:
+        try:
+            self._intro_alpha = 0.92
+            self._root.attributes("-alpha", self._intro_alpha)
+        except tk.TclError:
+            self._intro_alpha = 1.0
+        self._animate_chrome()
+
+    def _animate_chrome(self) -> None:
+        if self._closing:
+            return
+
+        self._animation_phase += 0.18
+        glow = 0.5 + 0.5 * math.sin(self._animation_phase)
+
+        header_color = self._mix_color("#64d8ff", "#22d3ee", glow)
+        self._header_label.configure(foreground=header_color)
+
+        idle_bg = self._mix_color("#12253d", "#173057", glow * 0.45)
+        idle_ring = self._mix_color("#345a86", "#2f7db3", glow * 0.45)
+        if not (self._controller.is_running() and self._selected_device_mode() == DEVICE_MODE_IPHONE):
+            self._pill_receiver.configure(bg=idle_bg, highlightbackground=idle_ring)
+        if not self._controller.is_recording():
+            self._pill_record.configure(bg=idle_bg, highlightbackground=idle_ring)
+
+        if self._intro_alpha < 1.0:
+            self._intro_alpha = min(1.0, self._intro_alpha + 0.02)
+            try:
+                self._root.attributes("-alpha", self._intro_alpha)
+            except tk.TclError:
+                self._intro_alpha = 1.0
+
+        self._animation_after_id = self._root.after(90, self._animate_chrome)
+
+    def _mix_color(self, c1: str, c2: str, t: float) -> str:
+        ratio = max(0.0, min(1.0, t))
+        r1, g1, b1 = (int(c1[i : i + 2], 16) for i in (1, 3, 5))
+        r2, g2, b2 = (int(c2[i : i + 2], 16) for i in (1, 3, 5))
+        r = round(r1 + (r2 - r1) * ratio)
+        g = round(g1 + (g2 - g1) * ratio)
+        b = round(b1 + (b2 - b1) * ratio)
+        return f"#{r:02x}{g:02x}{b:02x}"
 
     def _shortcut(self, fn: Callable[[], None]) -> str:
         if self._closing:
@@ -865,33 +928,33 @@ class MainWindow:
         if self._selected_device_mode() == DEVICE_MODE_ANDROID:
             self._receiver_status_var.set("Receptor: modo Android")
             self._btn_receiver.configure(text="Abrir proyección Android", underline=0, style="Primary.TButton")
-            self._pill_receiver.configure(bg="#1f2f4b", fg="#9fc9ff", highlightbackground="#365c8f")
+            self._pill_receiver.configure(bg="#1d304d", fg="#9fc9ff", highlightbackground="#365c8f")
             return
 
         if running:
             self._receiver_status_var.set("Receptor: activo")
             self._btn_receiver.configure(text="Detener receptor", underline=0, style="Danger.TButton")
-            self._pill_receiver.configure(bg="#0f2a24", fg="#5eead4", highlightbackground="#14b8a6")
+            self._pill_receiver.configure(bg="#103026", fg="#72f2de", highlightbackground="#18c3ae")
             self._set_status("Receptor activo.", "success")
             return
 
         self._receiver_status_var.set("Receptor: detenido")
         self._btn_receiver.configure(text="Iniciar receptor", underline=0, style="Primary.TButton")
-        self._pill_receiver.configure(bg="#2a1620", fg="#fb7185", highlightbackground="#be123c")
+        self._pill_receiver.configure(bg="#2b1620", fg="#ff8aa0", highlightbackground="#cc2a56")
         self._set_status("Receptor detenido.", "info")
 
     def _set_record_state(self, recording: bool) -> None:
         if recording:
             self._record_status_var.set("Grabación: activa")
             self._btn_record.configure(text="Detener grabación", underline=0, style="Danger.TButton")
-            self._pill_record.configure(bg="#2a1620", fg="#fb7185", highlightbackground="#be123c")
+            self._pill_record.configure(bg="#3a1424", fg="#ff8cad", highlightbackground="#cf2f61")
             self._set_status("Grabación activa.", "success")
             return
 
         self._record_suggested_name = None
         self._record_status_var.set("Grabación: inactiva")
         self._btn_record.configure(text="Grabar", underline=0, style="Danger.TButton")
-        self._pill_record.configure(bg="#1f2f4b", fg="#9fc9ff", highlightbackground="#365c8f")
+        self._pill_record.configure(bg="#1d304d", fg="#9fc9ff", highlightbackground="#365c8f")
 
     def _append_log(self, message: str) -> None:
         line = f"[{datetime.now().strftime('%H:%M:%S')}] {message}\n"
@@ -1050,6 +1113,9 @@ class MainWindow:
             return
 
         self._closing = True
+        if self._animation_after_id is not None:
+            self._root.after_cancel(self._animation_after_id)
+            self._animation_after_id = None
         if self._save_after_id is not None:
             self._root.after_cancel(self._save_after_id)
             self._save_after_id = None

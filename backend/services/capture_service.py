@@ -88,45 +88,68 @@ class CaptureService:
     ) -> None:
         with self._lock:
             if self._record_process is not None and self._record_process.poll() is None:
-                raise RuntimeError("Ya hay una grabación en curso.")
+                raise RuntimeError("Ya hay una grabacion en curso.")
 
             ffmpeg_path = self._resolve_ffmpeg_path(uxplay_path)
-            source_arg = self._build_capture_source(source_mode, window_title)
             env = self._build_capture_env(ffmpeg_path)
             creationflags = self._creationflags()
             startupinfo = self._startupinfo()
 
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
-            command = self._build_record_command(ffmpeg_path, source_arg, output_path, fps)
-            process = self._spawn_record_process(
-                command=command,
-                ffmpeg_path=ffmpeg_path,
-                env=env,
-                creationflags=creationflags,
-                startupinfo=startupinfo,
+            mode = source_mode.strip().lower()
+            candidate_sources = (
+                self._window_capture_sources(window_title)
+                if mode == "window"
+                else [self._build_capture_source(source_mode, window_title)]
             )
 
-            exited_early, early_output, early_code = self._check_early_startup_failure(process)
+            process: subprocess.Popen[str] | None = None
+            early_output = ""
+            early_code: int | None = None
+            selected_source = candidate_sources[0]
 
-            if exited_early:
+            for source_arg in candidate_sources:
+                command = self._build_record_command(ffmpeg_path, source_arg, output_path, fps)
+                process = self._spawn_record_process(
+                    command=command,
+                    ffmpeg_path=ffmpeg_path,
+                    env=env,
+                    creationflags=creationflags,
+                    startupinfo=startupinfo,
+                )
+                exited_early, early_output, early_code = self._check_early_startup_failure(process)
+                if not exited_early:
+                    selected_source = source_arg
+                    break
+                if mode == "window" and self._is_window_not_found_error(early_output):
+                    continue
+
                 details = self._summarize_early_failure(early_output, early_code)
-                raise RuntimeError(f"La grabación no pudo iniciar: {details}")
+                raise RuntimeError(f"La grabacion no pudo iniciar: {details}")
+            else:
+                details = self._summarize_early_failure(early_output, early_code)
+                raise RuntimeError(f"La grabacion no pudo iniciar: {details}")
+
+            if mode == "window" and selected_source != candidate_sources[0]:
+                selected_title = selected_source.removeprefix("title=")
+                self._emit_log(f"[PISTA] Se detecto la ventana de video como '{selected_title}' para la grabacion.")
+            if process is None:
+                raise RuntimeError("No se pudo iniciar la grabacion.")
 
             self._record_process = process
             self._record_output_path = output_path
             self._record_ffmpeg_path = ffmpeg_path
 
-        self._emit_log(f"Grabación iniciada: {output_path}")
+        self._emit_log(f"Grabacion iniciada: {output_path}")
         self._emit_recording_state(True)
 
-        if process is not None:
-            self._record_reader_thread = threading.Thread(
-                target=self._stream_record_output,
-                args=(process,),
-                daemon=True,
-            )
-            self._record_reader_thread.start()
+        self._record_reader_thread = threading.Thread(
+            target=self._stream_record_output,
+            args=(process,),
+            daemon=True,
+        )
+        self._record_reader_thread.start()
 
     def stop_recording(self, output_path: Path | None = None) -> None:
         process: subprocess.Popen[str] | None
@@ -230,9 +253,30 @@ class CaptureService:
     def _build_capture_source(self, source_mode: str, window_title: str) -> str:
         mode = source_mode.strip().lower()
         if mode == "window":
-            normalized_title = window_title.strip() or "UxPlay"
+            normalized_title = window_title.strip() or "Direct3D11 renderer"
             return f"title={normalized_title}"
         return "desktop"
+
+    def _window_capture_sources(self, window_title: str) -> list[str]:
+        ordered_titles = [
+            window_title.strip(),
+            "Direct3D11 renderer",
+            "UxPlay",
+        ]
+        unique_titles: list[str] = []
+        seen: set[str] = set()
+        for title in ordered_titles:
+            clean = " ".join(title.split()).strip()
+            if not clean:
+                continue
+            key = clean.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            unique_titles.append(clean)
+        if not unique_titles:
+            unique_titles.append("Direct3D11 renderer")
+        return [f"title={title}" for title in unique_titles]
 
     def _build_capture_env(self, ffmpeg_path: Path) -> dict[str, str]:
         env = os.environ.copy()
@@ -370,6 +414,10 @@ class CaptureService:
             except OSError:
                 output = ""
         return True, output, exit_code
+
+    def _is_window_not_found_error(self, text: str) -> bool:
+        low = text.lower()
+        return "can't find window" in low or "error opening input file title=" in low
 
     def _summarize_early_failure(self, output: str, exit_code: int | None) -> str:
         cleaned = " ".join((output or "").strip().split())
