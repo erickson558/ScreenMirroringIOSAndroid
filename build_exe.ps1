@@ -1,8 +1,8 @@
-param(
+﻿param(
     [string]$Python = "python",
     [string]$EntryPoint = "app.py",
-    [string]$AppName = "LonelyScreenIOS",
-    [string]$Icon = "lonelyscreenIOS.ico",
+    [string]$AppName = "ScreenMirrorIOSAndroid",
+    [string]$Icon = "ScreenMirrorIOSAndroid.ico",
     [string]$UxPlayRoot = "tools/uxplay",
     [string]$UxPlayBinaryRelative = "bin/uxplay.exe",
     [string]$VersionFile = "version.json",
@@ -49,14 +49,14 @@ Write-Host "Embedding '$UxPlayRoot' recursively ($uxplayFileCount files) into on
 Write-Host "Building $AppName.exe in current folder..."
 
 $versionFileAbsolute = Join-Path (Get-Location) $VersionFile
-$env:LONELYSCREENIOS_VERSION_FILE = $versionFileAbsolute
-$versionOutput = & $Python -c "import os; from pathlib import Path; from backend.versioning import bump_patch_version; info = bump_patch_version(Path(os.environ['LONELYSCREENIOS_VERSION_FILE'])); print(info.version)"
+$env:SCREENMIRRORIOSANDROID_VERSION_FILE = $versionFileAbsolute
+$versionOutput = & $Python -c "import os; from pathlib import Path; from backend.versioning import bump_patch_version; info = bump_patch_version(Path(os.environ['SCREENMIRRORIOSANDROID_VERSION_FILE'])); print(info.version)"
 if ($LASTEXITCODE -ne 0) {
-    throw "No se pudo incrementar la versión del proyecto."
+    throw "No se pudo incrementar la versiÃ³n del proyecto."
 }
 $currentVersion = ($versionOutput | Select-Object -Last 1).Trim()
 Write-Host "Version actual: $currentVersion"
-Remove-Item Env:LONELYSCREENIOS_VERSION_FILE -ErrorAction SilentlyContinue
+Remove-Item Env:SCREENMIRRORIOSANDROID_VERSION_FILE -ErrorAction SilentlyContinue
 
 $pyArgs = @(
     "-m", "PyInstaller",

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 
@@ -14,28 +14,28 @@ class ReceiverProfile:
 COMPATIBILITY_PROFILE = ReceiverProfile(
     key="compatibility",
     label="Compatibilidad (ajuste NTP)",
-    description="Más estable para espejo de iPhone. Desactiva sincronización problemática de tiempo.",
+    description="Mas estable para espejo de iPhone. Desactiva sincronizacion problematica de tiempo.",
     args=("-vsync", "no"),
 )
 
 BALANCED_PROFILE = ReceiverProfile(
     key="balanced",
     label="Equilibrado (UxPlay por defecto)",
-    description="Comportamiento nativo de UxPlay. Mejor sincronía A/V cuando NTP funciona correctamente.",
+    description="Comportamiento nativo de UxPlay. Mejor sincronia A/V cuando NTP funciona correctamente.",
     args=(),
 )
 
 LOW_LATENCY_PROFILE = ReceiverProfile(
     key="low_latency",
     label="Baja latencia (seguro)",
-    description="Menor retardo percibido con límite de 60 FPS y latencia de audio reducida.",
+    description="Menor retardo percibido con limite de 60 FPS y latencia de audio reducida.",
     args=("-vsync", "no", "-fps", "60", "-al", "0.12"),
 )
 
 ULTRA_PERFORMANCE_PROFILE = ReceiverProfile(
     key="ultra_performance",
-    label="Ultra baja latencia (DX11)",
-    description="Usa decodificación + render Direct3D11 para máximo rendimiento en GPU compatible.",
+    label="Ultra baja latencia (estable)",
+    description="Mantiene latencia minima sin forzar pipeline DX11 para evitar cierres de ventana.",
     args=(
         "-vsync",
         "no",
@@ -43,12 +43,6 @@ ULTRA_PERFORMANCE_PROFILE = ReceiverProfile(
         "60",
         "-al",
         "0.08",
-        "-vd",
-        "d3d11h264dec",
-        "-vc",
-        "d3d11convert",
-        "-vs",
-        "d3d11videosink",
     ),
 )
 

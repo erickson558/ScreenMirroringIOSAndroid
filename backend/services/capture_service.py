@@ -38,7 +38,8 @@ class CaptureService:
         ffmpeg_path = self._resolve_ffmpeg_path(uxplay_path)
         source_arg = self._build_capture_source(source_mode, window_title)
         env = self._build_capture_env(ffmpeg_path)
-        creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        creationflags = self._creationflags()
+        startupinfo = self._startupinfo()
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -66,6 +67,7 @@ class CaptureService:
             capture_output=True,
             text=True,
             creationflags=creationflags,
+            startupinfo=startupinfo,
             check=False,
         )
 
@@ -90,52 +92,43 @@ class CaptureService:
             ffmpeg_path = self._resolve_ffmpeg_path(uxplay_path)
             source_arg = self._build_capture_source(source_mode, window_title)
             env = self._build_capture_env(ffmpeg_path)
-            creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+            creationflags = self._creationflags()
+            startupinfo = self._startupinfo()
 
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
-            command = [
-                str(ffmpeg_path),
-                "-hide_banner",
-                "-loglevel",
-                "warning",
-                "-y",
-                "-f",
-                "gdigrab",
-                "-framerate",
-                str(max(10, min(fps, 120))),
-                "-draw_mouse",
-                "0",
-                "-i",
-                source_arg,
-                "-c:v",
-                "libx264",
-                "-preset",
-                "veryfast",
-                "-tune",
-                "zerolatency",
-                "-pix_fmt",
-                "yuv420p",
-                "-movflags",
-                "+faststart",
-                str(output_path),
-            ]
-
-            self._record_process = subprocess.Popen(
-                command,
-                cwd=str(ffmpeg_path.parent),
+            command = self._build_record_command(ffmpeg_path, source_arg, output_path, fps)
+            process = self._spawn_record_process(
+                command=command,
+                ffmpeg_path=ffmpeg_path,
                 env=env,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                universal_newlines=True,
-                bufsize=1,
                 creationflags=creationflags,
+                startupinfo=startupinfo,
             )
-            self._record_output_path = output_path
 
-            process = self._record_process
+            exited_early, early_output, early_code = self._check_early_startup_failure(process)
+            if exited_early and source_mode.strip().lower() == "window" and self._is_window_not_found_error(early_output):
+                fallback_source = "desktop"
+                fallback_command = self._build_record_command(ffmpeg_path, fallback_source, output_path, fps)
+                self._emit_log(
+                    "[ADVERTENCIA] No se encontró la ventana de UxPlay para grabación. "
+                    "Se cambia automáticamente a captura de escritorio."
+                )
+                process = self._spawn_record_process(
+                    command=fallback_command,
+                    ffmpeg_path=ffmpeg_path,
+                    env=env,
+                    creationflags=creationflags,
+                    startupinfo=startupinfo,
+                )
+                exited_early, early_output, early_code = self._check_early_startup_failure(process)
+
+            if exited_early:
+                details = self._summarize_early_failure(early_output, early_code)
+                raise RuntimeError(f"La grabación no pudo iniciar: {details}")
+
+            self._record_process = process
+            self._record_output_path = output_path
 
         self._emit_log(f"Grabación iniciada: {output_path}")
         self._emit_recording_state(True)
@@ -244,6 +237,82 @@ class CaptureService:
         env["PATH"] = str(ffmpeg_path.parent) + os.pathsep + env.get("PATH", "")
         return env
 
+    def _build_record_command(self, ffmpeg_path: Path, source_arg: str, output_path: Path, fps: int) -> list[str]:
+        return [
+            str(ffmpeg_path),
+            "-hide_banner",
+            "-loglevel",
+            "warning",
+            "-y",
+            "-f",
+            "gdigrab",
+            "-framerate",
+            str(max(10, min(fps, 120))),
+            "-draw_mouse",
+            "0",
+            "-i",
+            source_arg,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-tune",
+            "zerolatency",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            str(output_path),
+        ]
+
+    def _spawn_record_process(
+        self,
+        command: list[str],
+        ffmpeg_path: Path,
+        env: dict[str, str],
+        creationflags: int,
+        startupinfo: subprocess.STARTUPINFO | None,
+    ) -> subprocess.Popen[str]:
+        return subprocess.Popen(
+            command,
+            cwd=str(ffmpeg_path.parent),
+            env=env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            universal_newlines=True,
+            bufsize=1,
+            creationflags=creationflags,
+            startupinfo=startupinfo,
+        )
+
+    def _check_early_startup_failure(self, process: subprocess.Popen[str], timeout: float = 0.85) -> tuple[bool, str, int | None]:
+        try:
+            exit_code = process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return False, "", None
+
+        output = ""
+        if process.stdout is not None:
+            try:
+                output = process.stdout.read() or ""
+            except OSError:
+                output = ""
+        return True, output, exit_code
+
+    def _is_window_not_found_error(self, text: str) -> bool:
+        low = text.lower()
+        return "can't find window" in low or "error opening input file title=" in low
+
+    def _summarize_early_failure(self, output: str, exit_code: int | None) -> str:
+        cleaned = " ".join((output or "").strip().split())
+        if cleaned:
+            return cleaned
+        if exit_code is not None:
+            return f"ffmpeg finalizó al iniciar con código {exit_code}."
+        return "Error desconocido al iniciar ffmpeg."
+
     def _emit_log(self, message: str) -> None:
         if self._on_log is not None:
             self._on_log(message)
@@ -251,3 +320,14 @@ class CaptureService:
     def _emit_recording_state(self, recording: bool) -> None:
         if self._on_recording_state is not None:
             self._on_recording_state(recording)
+
+    def _creationflags(self) -> int:
+        return subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
+    def _startupinfo(self) -> subprocess.STARTUPINFO | None:
+        if os.name != "nt":
+            return None
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0
+        return startupinfo

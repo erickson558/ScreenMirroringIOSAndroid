@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,8 +10,8 @@ from backend.receiver_profiles import DEFAULT_PROFILE_KEY
 
 @dataclass(frozen=True, slots=True)
 class AppConfig:
-    app_name: str = "ScreenMirroringIOSAndroid"
-    default_receiver_name: str = "ScreenMirroringIOSAndroid"
+    app_name: str = "ScreenMirrorIOSAndroid"
+    default_receiver_name: str = "ScreenMirrorIOSAndroid"
     default_uxplay_relative_path: str = "tools/uxplay/bin/uxplay.exe"
     default_profile_key: str = DEFAULT_PROFILE_KEY
     default_device_mode_key: str = DEFAULT_DEVICE_MODE_KEY

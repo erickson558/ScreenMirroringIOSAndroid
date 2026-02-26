@@ -1,1 +1,1 @@
-﻿"""Backend package for LonelyScreenIOS."""
+﻿"""Backend package for ScreenMirrorIOSAndroid."""

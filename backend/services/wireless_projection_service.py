@@ -77,13 +77,14 @@ class WirelessProjectionService:
         )
 
     def _open_uri(self, uri: str) -> None:
-        creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        creationflags = self._creationflags()
         subprocess.Popen(
             ["explorer.exe", uri],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL,
             creationflags=creationflags,
+            startupinfo=self._startupinfo(),
         )
 
     def _probe_wireless_display_capability(self) -> str:
@@ -169,7 +170,7 @@ class WirelessProjectionService:
         return None
 
     def _run_command(self, command: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
-        creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        creationflags = self._creationflags()
         result = subprocess.run(
             command,
             capture_output=True,
@@ -178,6 +179,7 @@ class WirelessProjectionService:
             check=False,
             stdin=subprocess.DEVNULL,
             creationflags=creationflags,
+            startupinfo=self._startupinfo(),
         )
         return subprocess.CompletedProcess(
             args=result.args,
@@ -236,3 +238,14 @@ class WirelessProjectionService:
     def _emit_log(self, message: str) -> None:
         if self._on_log is not None:
             self._on_log(message)
+
+    def _creationflags(self) -> int:
+        return subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
+    def _startupinfo(self) -> subprocess.STARTUPINFO | None:
+        if os.name != "nt":
+            return None
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0
+        return startupinfo

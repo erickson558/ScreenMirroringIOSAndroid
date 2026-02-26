@@ -1,25 +1,26 @@
-# LonelyScreenIOS (Python)
+﻿# ScreenMirrorIOSAndroid (Python)
 
-Aplicación de escritorio en Python con arquitectura separada (`backend`/`frontend`) para espejo de pantalla con iPhone (AirPlay/UxPlay) y Android (Proyección inalámbrica/Miracast).
+AplicaciÃ³n de escritorio en Python con arquitectura separada (`backend`/`frontend`) para espejo de pantalla con iPhone (AirPlay/UxPlay) y Android (ProyecciÃ³n inalÃ¡mbrica/Miracast).
 
 ## Funcionalidades
 
-- Interfaz estilo Aero en español.
+- Interfaz estilo Aero en espaÃ±ol.
 - Selector de dispositivo con `Radiobutton`: `iPhone` / `Android`.
-- Guardado automático de configuración de la GUI en `config.json`.
+- Guardado automÃ¡tico de configuraciÃ³n de la GUI en `config.json`.
 - Atajos de teclado estilo Windows con letra subrayada (`Alt + tecla`).
-- Barra de menú (`Archivo`/`Ayuda`) y ventana `Acerca de` con versión.
-- Barra de estado para mensajes de la aplicación (sin `messagebox`).
-- Captura de imagen con selección de ruta de guardado.
-- Grabación de video `.mp4`.
-- Perfiles de transmisión para estabilidad y menor latencia.
-- Registro en tiempo real con pistas de diagnóstico.
-- Versionado en `version.json` con incremento automático al compilar.
+- Barra de menÃº (`Archivo`/`Ayuda`) y ventana `Acerca de` con versiÃ³n.
+- Barra de estado para mensajes de la aplicaciÃ³n (sin `messagebox`).
+- Captura de imagen con selecciÃ³n de ruta de guardado.
+- GrabaciÃ³n de video `.mp4`.
+- Perfiles de transmisiÃ³n para estabilidad y menor latencia.
+- Registro en tiempo real con pistas de diagnÃ³stico.
+- Anuncio AirPlay multi-interfaz en Windows (si hay VPN/Wi-Fi/LAN activas, crea una instancia por adaptador).
+- Versionado en `version.json` con incremento automÃ¡tico al compilar.
 - Log en `log.txt` con timestamp.
 
 ## Nota importante
 
-AirPlay/Miracast en este flujo es recepción de audio/video. No hay control táctil directo del teléfono desde la ventana.
+AirPlay/Miracast en este flujo es recepciÃ³n de audio/video. No hay control tÃ¡ctil directo del telÃ©fono desde la ventana.
 
 ## Requisitos
 
@@ -28,7 +29,7 @@ AirPlay/Miracast en este flujo es recepción de audio/video. No hay control tác
   - `tools/uxplay/bin/uxplay.exe`
   - `tools/uxplay/lib/...`
 
-## Ejecución en desarrollo
+## EjecuciÃ³n en desarrollo
 
 ```powershell
 python -m venv .venv
@@ -39,8 +40,8 @@ python app.py
 
 ## Modo Android y Miracast
 
-- Al pulsar `Abrir proyección Android`, la app abre la configuración de proyección de Windows.
-- Si el equipo no admite recibir Miracast, Android no encontrará el receptor. La app lo reporta con diagnóstico.
+- Al pulsar `Abrir proyecciÃ³n Android`, la app abre la configuraciÃ³n de proyecciÃ³n de Windows.
+- Si el equipo no admite recibir Miracast, Android no encontrarÃ¡ el receptor. La app lo reporta con diagnÃ³stico.
 
 ## Compilar EXE en la misma carpeta del `.py`
 
@@ -50,7 +51,7 @@ python app.py
 
 Resultado:
 
-- `LonelyScreenIOS.exe` en la raíz del proyecto (no en `dist`)
-- Ícono cargado desde `lonelyscreenIOS.ico`
+- `ScreenMirrorIOSAndroid.exe` en la raÃ­z del proyecto (no en `dist`)
+- Ãcono cargado desde `ScreenMirrorIOSAndroid.ico`
 - Runtime `tools/uxplay` embebido en el ejecutable `onefile`
-- Incremento automático de versión (`version.json`, +`0.0.1` por compilación)
+- Incremento automÃ¡tico de versiÃ³n (`version.json`, +`0.0.1` por compilaciÃ³n)

@@ -1,1 +1,1 @@
-﻿"""Frontend package for LonelyScreenIOS."""
+﻿"""Frontend package for ScreenMirrorIOSAndroid."""

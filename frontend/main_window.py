@@ -103,45 +103,68 @@ class MainWindow:
         self._root.title(f"{self._app_name} - Estudio Aero")
         self._root.geometry("1120x720")
         self._root.minsize(960, 620)
+        self._root.configure(bg="#060b16")
 
         self._build_menu()
 
         style = ttk.Style(self._root)
         style.theme_use("clam")
-        style.configure("Root.TFrame", background="#ddeafb")
-        style.configure("Card.TLabelframe", background="#f7fbff")
+        style.configure("Root.TFrame", background="#060b16")
+        style.configure("Card.TLabelframe", background="#101b2b", borderwidth=1, relief="solid")
         style.configure(
             "Card.TLabelframe.Label",
-            background="#f7fbff",
-            foreground="#1d4f80",
-            font=("Segoe UI Semibold", 10),
+            background="#101b2b",
+            foreground="#67e8f9",
+            font=("Bahnschrift SemiBold", 10),
         )
-        style.configure("Card.TLabel", background="#f7fbff", foreground="#243b55", font=("Segoe UI", 10))
-        style.configure("Hint.TLabel", background="#f7fbff", foreground="#4f6684", font=("Segoe UI", 9))
+        style.configure("Card.TLabel", background="#101b2b", foreground="#d7e6ff", font=("Bahnschrift", 10))
+        style.configure("Hint.TLabel", background="#101b2b", foreground="#87a7d6", font=("Bahnschrift", 9))
         style.configure(
             "Primary.TButton",
-            font=("Segoe UI Semibold", 10),
-            foreground="#ffffff",
-            background="#3d8bd5",
+            font=("Bahnschrift SemiBold", 10),
+            foreground="#03121c",
+            background="#2dd4bf",
             padding=(12, 8),
+            borderwidth=0,
         )
         style.configure(
             "Glass.TButton",
-            font=("Segoe UI Semibold", 9),
-            foreground="#0d3b6f",
-            background="#d8eafc",
+            font=("Bahnschrift SemiBold", 9),
+            foreground="#d9e9ff",
+            background="#1c2c47",
             padding=(10, 6),
+            borderwidth=0,
         )
         style.configure(
             "Danger.TButton",
-            font=("Segoe UI Semibold", 10),
+            font=("Bahnschrift SemiBold", 10),
             foreground="#ffffff",
-            background="#c74b5b",
+            background="#e11d48",
             padding=(12, 8),
+            borderwidth=0,
         )
-        style.configure("Card.TRadiobutton", background="#f7fbff", foreground="#243b55", font=("Segoe UI Semibold", 9))
-        style.configure("Status.TLabel", background="#ddeafb", foreground="#163252", font=("Segoe UI", 9))
-        style.configure("Version.TLabel", background="#ddeafb", foreground="#325a84", font=("Segoe UI Semibold", 9))
+        style.map(
+            "Primary.TButton",
+            background=[("active", "#5eead4"), ("pressed", "#14b8a6")],
+        )
+        style.map(
+            "Glass.TButton",
+            background=[("active", "#24395b"), ("pressed", "#17243b")],
+        )
+        style.map(
+            "Danger.TButton",
+            background=[("active", "#fb7185"), ("pressed", "#be123c")],
+        )
+        style.configure(
+            "Card.TRadiobutton",
+            background="#101b2b",
+            foreground="#d7e6ff",
+            font=("Bahnschrift SemiBold", 9),
+        )
+        style.configure("Status.TLabel", background="#060b16", foreground="#9bd8ff", font=("Bahnschrift", 9))
+        style.configure("Version.TLabel", background="#060b16", foreground="#67e8f9", font=("Bahnschrift SemiBold", 9))
+        style.configure("TEntry", fieldbackground="#0e1a2c", foreground="#d7e6ff")
+        style.configure("TCombobox", fieldbackground="#0e1a2c", foreground="#d7e6ff")
 
         root = ttk.Frame(self._root, style="Root.TFrame", padding=14)
         root.pack(fill="both", expand=True)
@@ -152,9 +175,9 @@ class MainWindow:
         header = ttk.Label(
             header_wrap,
             text=f"{self._app_name}  |  iPhone AirPlay + Android Proyección inalámbrica",
-            font=("Segoe UI Semibold", 18),
-            foreground="#0f3f73",
-            background="#ddeafb",
+            font=("Bahnschrift SemiBold", 18),
+            foreground="#84ccff",
+            background="#060b16",
         )
         header.pack(side="left", anchor="w")
 
@@ -204,21 +227,27 @@ class MainWindow:
         self._pill_receiver = tk.Label(
             top,
             textvariable=self._receiver_status_var,
-            font=("Segoe UI Semibold", 9),
+            font=("Bahnschrift SemiBold", 9),
             padx=10,
             pady=4,
             bd=1,
             relief="solid",
+            bg="#13243b",
+            fg="#8cc8ff",
+            highlightbackground="#345a86",
         )
         self._pill_receiver.pack(side="right")
         self._pill_record = tk.Label(
             top,
             textvariable=self._record_status_var,
-            font=("Segoe UI Semibold", 9),
+            font=("Bahnschrift SemiBold", 9),
             padx=10,
             pady=4,
             bd=1,
             relief="solid",
+            bg="#13243b",
+            fg="#8cc8ff",
+            highlightbackground="#345a86",
         )
         self._pill_record.pack(side="right", padx=(0, 8))
 
@@ -244,12 +273,21 @@ class MainWindow:
         logs_card.rowconfigure(0, weight=1)
         logs_card.columnconfigure(0, weight=1)
 
-        self._log_box = scrolledtext.ScrolledText(logs_card, wrap="word", state="disabled", font=("Consolas", 10))
+        self._log_box = scrolledtext.ScrolledText(
+            logs_card,
+            wrap="word",
+            state="disabled",
+            font=("Cascadia Code", 10),
+            background="#071225",
+            foreground="#b8d7ff",
+            insertbackground="#7dd3fc",
+            relief="flat",
+        )
         self._log_box.grid(row=0, column=0, sticky="nsew")
-        self._log_box.tag_configure("error", foreground="#b0283f")
-        self._log_box.tag_configure("warning", foreground="#a86c00")
-        self._log_box.tag_configure("hint", foreground="#2d5f9a")
-        self._log_box.tag_configure("recording", foreground="#7a1d2b")
+        self._log_box.tag_configure("error", foreground="#fb7185")
+        self._log_box.tag_configure("warning", foreground="#fbbf24")
+        self._log_box.tag_configure("hint", foreground="#67e8f9")
+        self._log_box.tag_configure("recording", foreground="#f472b6")
 
         status_wrap = ttk.Frame(root, style="Root.TFrame")
         status_wrap.pack(fill="x", pady=(8, 0))
@@ -546,7 +584,7 @@ class MainWindow:
         self._entry_args.configure(state="disabled")
         self._btn_receiver.configure(text="Abrir proyección Android", underline=0, style="Primary.TButton")
         self._receiver_status_var.set("Receptor: modo Android")
-        self._pill_receiver.configure(bg="#e6ebff", fg="#2d4b7d", highlightbackground="#98add8")
+        self._pill_receiver.configure(bg="#1f2f4b", fg="#9fc9ff", highlightbackground="#365c8f")
         if log_change:
             self._append_log("Modo de dispositivo: Android (Proyección inalámbrica).")
             self._set_status("Modo Android activo.", "info")
@@ -594,7 +632,7 @@ class MainWindow:
             self._set_status("Falta la ruta de UxPlay.", "error")
             return
 
-        name = self._receiver_name_var.get().strip() or "LonelyScreenIOS"
+        name = self._receiver_name_var.get().strip() or "ScreenMirrorIOSAndroid"
         profile = self._profiles_by_label.get(self._profile_var.get()) or get_profile(DEFAULT_PROFILE_KEY)
 
         try:
@@ -619,7 +657,7 @@ class MainWindow:
         self._run_in_background(
             action_label="Iniciando receptor",
             fn=start_receiver,
-            success_status=f"Receptor listo con nombre: {name} ({suffix_mode})",
+            success_status=f"Receptor iniciándose con nombre: {name} ({suffix_mode})",
         )
 
     def _open_android_projection(self) -> None:
@@ -702,6 +740,7 @@ class MainWindow:
                 action_label="Deteniendo grabación",
                 fn=self._controller.stop_recording,
                 success_status="Grabación detenida.",
+                busy=False,
             )
             return
 
@@ -735,6 +774,7 @@ class MainWindow:
             action_label="Iniciando grabación",
             fn=start_recording,
             success_status="Grabación iniciada.",
+            busy=False,
         )
 
     def _parse_args(self, raw: str) -> list[str]:
@@ -772,6 +812,17 @@ class MainWindow:
         if message.startswith("Iniciando receptor:"):
             self._ntp_error_count = 0
             self._ntp_hint_shown = False
+        if "initialized server socket(s)" in low:
+            self._set_status("Receptor listo para conectar desde iPhone.", "success")
+        if "raop_rtp_mirror starting mirroring" in low:
+            self._set_status("Conexión AirPlay establecida. Abriendo ventana de video...", "info")
+        if "reiniciando receptor automáticamente" in low:
+            self._set_status("Recuperando primer enlace AirPlay automáticamente...", "warning")
+        if "receptor reiniciado automáticamente" in low:
+            self._set_status("Receptor recuperado. Intenta conectar de nuevo si estaba en espera.", "success")
+        if "gstreamer error: output window was closed" in low:
+            self._append_log("[ADVERTENCIA] UxPlay cerró la ventana de video. Se recomienda usar perfil de render estable.")
+            self._set_status("La ventana de video se cerró; cambiando a perfil estable recomendado.", "warning")
         if "invalid ntp_time < gst_video_pipeline_base_time" in low:
             self._ntp_error_count += 1
         if self._ntp_error_count >= 8 and not self._ntp_hint_shown:
@@ -783,32 +834,32 @@ class MainWindow:
         if self._selected_device_mode() == DEVICE_MODE_ANDROID:
             self._receiver_status_var.set("Receptor: modo Android")
             self._btn_receiver.configure(text="Abrir proyección Android", underline=0, style="Primary.TButton")
-            self._pill_receiver.configure(bg="#e6ebff", fg="#2d4b7d", highlightbackground="#98add8")
+            self._pill_receiver.configure(bg="#1f2f4b", fg="#9fc9ff", highlightbackground="#365c8f")
             return
 
         if running:
             self._receiver_status_var.set("Receptor: activo")
             self._btn_receiver.configure(text="Detener receptor", underline=0, style="Danger.TButton")
-            self._pill_receiver.configure(bg="#d8f1df", fg="#1f6b35", highlightbackground="#67af78")
+            self._pill_receiver.configure(bg="#0f2a24", fg="#5eead4", highlightbackground="#14b8a6")
             self._set_status("Receptor activo.", "success")
             return
 
         self._receiver_status_var.set("Receptor: detenido")
         self._btn_receiver.configure(text="Iniciar receptor", underline=0, style="Primary.TButton")
-        self._pill_receiver.configure(bg="#f6dde2", fg="#8f1f35", highlightbackground="#d995a2")
+        self._pill_receiver.configure(bg="#2a1620", fg="#fb7185", highlightbackground="#be123c")
         self._set_status("Receptor detenido.", "info")
 
     def _set_record_state(self, recording: bool) -> None:
         if recording:
             self._record_status_var.set("Grabación: activa")
             self._btn_record.configure(text="Detener grabación", underline=0, style="Danger.TButton")
-            self._pill_record.configure(bg="#ffe6e8", fg="#8f1728", highlightbackground="#d77c89")
+            self._pill_record.configure(bg="#2a1620", fg="#fb7185", highlightbackground="#be123c")
             self._set_status("Grabación activa.", "success")
             return
 
         self._record_status_var.set("Grabación: inactiva")
         self._btn_record.configure(text="Grabar", underline=0, style="Danger.TButton")
-        self._pill_record.configure(bg="#e5edf7", fg="#274a72", highlightbackground="#9bb7d8")
+        self._pill_record.configure(bg="#1f2f4b", fg="#9fc9ff", highlightbackground="#365c8f")
 
     def _append_log(self, message: str) -> None:
         line = f"[{datetime.now().strftime('%H:%M:%S')}] {message}\n"
@@ -852,13 +903,20 @@ class MainWindow:
         dialog.resizable(False, False)
         dialog.transient(self._root)
         dialog.grab_set()
-        dialog.configure(bg="#edf4ff")
+        dialog.configure(bg="#0a1222")
 
-        container = ttk.Frame(dialog, padding=16)
+        container = ttk.Frame(dialog, style="Root.TFrame", padding=16)
         container.pack(fill="both", expand=True)
 
-        ttk.Label(container, text=self._app_name, font=("Segoe UI Semibold", 13)).pack(anchor="w")
-        ttk.Label(container, text=text, font=("Segoe UI", 10), wraplength=380, justify="left").pack(anchor="w", pady=(6, 12))
+        ttk.Label(container, text=self._app_name, font=("Bahnschrift SemiBold", 13), style="Status.TLabel").pack(anchor="w")
+        ttk.Label(
+            container,
+            text=text,
+            font=("Bahnschrift", 10),
+            style="Status.TLabel",
+            wraplength=380,
+            justify="left",
+        ).pack(anchor="w", pady=(6, 12))
         ttk.Button(container, text="Cerrar", command=dialog.destroy).pack(anchor="e")
 
         dialog.bind("<Escape>", lambda _e: dialog.destroy())
@@ -871,10 +929,10 @@ class MainWindow:
             clean = "Listo."
 
         palette = {
-            "info": "#163252",
-            "success": "#1f6b35",
-            "warning": "#8a5b00",
-            "error": "#8f1f35",
+            "info": "#9bd8ff",
+            "success": "#5eead4",
+            "warning": "#fbbf24",
+            "error": "#fb7185",
         }
         color = palette.get(level, palette["info"])
         self._status_label.configure(foreground=color)
