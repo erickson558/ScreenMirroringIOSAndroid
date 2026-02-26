@@ -1,0 +1,3 @@
+﻿# Runtime dependencies are part of standard Python.
+# Build dependency:
+pyinstaller>=6.6

@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build and packaging artifacts
+build/
+dist/
+*.spec
+
+# Local runtime/config/output
+config.json
+log.txt
+*.log
+*.exe
+
+# Large third-party runtime binaries (kept local)
+tools/uxplay/bin/
+tools/uxplay/lib/
+
+# Temporary folders
+tmp_download/
+tmp_install/
+tmp_min_uxplay/
