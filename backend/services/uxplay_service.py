@@ -39,6 +39,7 @@ class UxPlayService:
         self._scheduled_recovery_id: int | None = None
         self._recovery_sequence = 0
         self._recovery_delay_seconds = 2.5
+        self._manual_stop_until = 0.0
         self._lock = threading.Lock()
 
     @property
@@ -75,6 +76,7 @@ class UxPlayService:
             if not append_hostname_suffix:
                 runtime_args = ["-nh", *runtime_args]
             runtime_args, port_hint = self._ensure_legacy_ports(runtime_args)
+            runtime_args, persist_hint = self._ensure_window_persistence(runtime_args)
             launch_plans = self._build_launch_plans(receiver_name, runtime_args)
             self._last_start_request = _StartRequest(
                 uxplay_path=normalized_path,
@@ -132,6 +134,8 @@ class UxPlayService:
             self._emit_log(hint)
         if port_hint:
             self._emit_log(port_hint)
+        if persist_hint:
+            self._emit_log(persist_hint)
         self._emit_log(
             "[PISTA] Espera a ver 'Initialized server socket(s)' antes de conectar en iPhone para evitar doble intento."
         )
@@ -155,6 +159,9 @@ class UxPlayService:
         with self._lock:
             self._prune_dead_processes_locked()
             processes = list(self._processes.values())
+            if processes:
+                # Avoid triggering auto-recovery for intentional local stops.
+                self._manual_stop_until = time.monotonic() + 4.0
             if not processes:
                 self._scheduled_recovery_id = None
 
@@ -195,13 +202,14 @@ class UxPlayService:
             key = self._process_key(process)
             removed = self._processes.pop(key, None) is not None
             self._reader_threads.pop(key, None)
-            self._mirror_started_at.pop(key, None)
+            started_at = self._mirror_started_at.pop(key, 0.0)
             if removed and not self._processes:
                 should_emit_state = True
 
         self._emit_log(self._format_instance_message(f"El proceso del receptor finalizo con codigo {exit_code}.", label))
         if should_emit_state:
             self._emit_state(False)
+        self._maybe_recover_on_early_exit(exit_code=exit_code, started_at=started_at)
 
     def _build_runtime_env(self, uxplay_executable: Path) -> dict[str, str]:
         env = os.environ.copy()
@@ -306,6 +314,15 @@ class UxPlayService:
         return (
             ["-p", *runtime_args],
             "[PISTA] Se habilitaron puertos AirPlay legados (-p) para maxima compatibilidad de red/firewall.",
+        )
+
+    def _ensure_window_persistence(self, runtime_args: list[str]) -> tuple[list[str], str | None]:
+        lowered = {arg.lower() for arg in runtime_args}
+        if "-nc" in lowered:
+            return runtime_args, None
+        return (
+            [*runtime_args, "-nc"],
+            "[PISTA] Se activo '-nc' para mantener la ventana abierta entre reconexiones AirPlay.",
         )
 
     def _build_instance_name(self, receiver_name: str, adapter_name: str, index: int) -> str:
@@ -432,10 +449,7 @@ class UxPlayService:
                 )
             return
 
-        if (
-            "raop_rtp_mirror error in accept" not in low
-            and "raop_rtp_mirror->running is no longer true" not in low
-        ):
+        if "raop_rtp_mirror->running is no longer true" not in low:
             return
 
         with self._lock:
@@ -445,8 +459,29 @@ class UxPlayService:
             return
         if now - started_at > 45:
             return
+        if self._should_suppress_auto_recovery(now):
+            return
 
         self._request_auto_recovery(trigger_line=line)
+
+    def _maybe_recover_on_early_exit(self, exit_code: int, started_at: float) -> None:
+        if exit_code == 0 or started_at <= 0.0:
+            return
+
+        now = time.monotonic()
+        if now - started_at > 45:
+            return
+        if self._should_suppress_auto_recovery(now):
+            return
+
+        self._request_auto_recovery(
+            trigger_line=f"Proceso finalizo pronto tras iniciar mirroring (codigo {exit_code})."
+        )
+
+    def _should_suppress_auto_recovery(self, now: float | None = None) -> bool:
+        instant = now if now is not None else time.monotonic()
+        with self._lock:
+            return instant < self._manual_stop_until
 
     def _request_auto_recovery(self, trigger_line: str) -> None:
         with self._lock:

@@ -816,9 +816,9 @@ class MainWindow:
             self._set_status("Receptor listo para conectar desde iPhone.", "success")
         if "raop_rtp_mirror starting mirroring" in low:
             self._set_status("Conexión AirPlay establecida. Abriendo ventana de video...", "info")
-        if "reiniciando receptor automáticamente" in low:
+        if "reiniciando receptor automáticamente" in low or "reiniciando receptor automaticamente" in low:
             self._set_status("Recuperando primer enlace AirPlay automáticamente...", "warning")
-        if "receptor reiniciado automáticamente" in low:
+        if "receptor reiniciado automáticamente" in low or "receptor reiniciado automaticamente" in low:
             self._set_status("Receptor recuperado. Intenta conectar de nuevo si estaba en espera.", "success")
         if "gstreamer error: output window was closed" in low:
             self._append_log("[ADVERTENCIA] UxPlay cerró la ventana de video. Se recomienda usar perfil de render estable.")
