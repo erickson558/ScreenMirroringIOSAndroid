@@ -15,6 +15,10 @@ RecordingStateCallback = Callable[[bool], None]
 
 
 class CaptureService:
+    _WINDOW_REGION_PADDING_PX = 10
+    _WINDOW_REGION_STABILIZATION_SAMPLES = 4
+    _WINDOW_REGION_STABILIZATION_DELAY_SECONDS = 0.1
+
     def __init__(
         self,
         on_log: LogCallback | None = None,
@@ -452,7 +456,14 @@ class CaptureService:
 
         if hwnd is None:
             return None
-        return self._resolve_window_region_by_handle(hwnd)
+        region = self._resolve_window_region_by_handle(hwnd)
+        if region is None:
+            return None
+
+        stabilized_region = self._stabilize_window_region(hwnd, region)
+        if stabilized_region is not None:
+            return stabilized_region
+        return region
 
     def _parse_hwnd_value(self, raw_value: str) -> int | None:
         value = " ".join(raw_value.split()).strip()
@@ -467,37 +478,157 @@ class CaptureService:
         return hwnd
 
     def _resolve_window_region_by_handle(self, hwnd: int) -> tuple[int, int, int, int] | None:
-        user32 = ctypes.windll.user32
-        if not user32.IsWindowVisible(hwnd):
+        window_rect = self._get_window_rect(hwnd)
+        if window_rect is None:
             return None
 
-        rect = wintypes.RECT()
-        if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+        clamped = self._clamp_rect_to_virtual_screen(*window_rect)
+        if clamped is None:
             return None
 
-        left = int(rect.left)
-        top = int(rect.top)
-        right = int(rect.right)
-        bottom = int(rect.bottom)
-
-        virtual_x = int(user32.GetSystemMetrics(76))  # SM_XVIRTUALSCREEN
-        virtual_y = int(user32.GetSystemMetrics(77))  # SM_YVIRTUALSCREEN
-        virtual_w = int(user32.GetSystemMetrics(78))  # SM_CXVIRTUALSCREEN
-        virtual_h = int(user32.GetSystemMetrics(79))  # SM_CYVIRTUALSCREEN
-        max_x = virtual_x + virtual_w
-        max_y = virtual_y + virtual_h
-
-        left = max(left, virtual_x)
-        top = max(top, virtual_y)
-        right = min(right, max_x)
-        bottom = min(bottom, max_y)
-
+        left, top, right, bottom = self._ensure_even_rect_dimensions(*clamped)
         width = right - left
         height = bottom - top
         if width < 32 or height < 32:
             return None
 
         return (left, top, width, height)
+
+    def _stabilize_window_region(
+        self,
+        hwnd: int,
+        initial_region: tuple[int, int, int, int],
+    ) -> tuple[int, int, int, int] | None:
+        left, top, width, height = initial_region
+        right = left + width
+        bottom = top + height
+
+        for _ in range(self._WINDOW_REGION_STABILIZATION_SAMPLES):
+            time.sleep(self._WINDOW_REGION_STABILIZATION_DELAY_SECONDS)
+            current = self._resolve_window_region_by_handle(hwnd)
+            if current is None:
+                continue
+            cur_left, cur_top, cur_width, cur_height = current
+            cur_right = cur_left + cur_width
+            cur_bottom = cur_top + cur_height
+            left = min(left, cur_left)
+            top = min(top, cur_top)
+            right = max(right, cur_right)
+            bottom = max(bottom, cur_bottom)
+
+        padded = self._expand_rect_with_padding(left, top, right, bottom, self._WINDOW_REGION_PADDING_PX)
+        if padded is None:
+            return None
+
+        left, top, right, bottom = self._ensure_even_rect_dimensions(*padded)
+        width = right - left
+        height = bottom - top
+        if width < 32 or height < 32:
+            return None
+
+        return (left, top, width, height)
+
+    def _get_window_rect(self, hwnd: int) -> tuple[int, int, int, int] | None:
+        user32 = ctypes.windll.user32
+        if not user32.IsWindow(hwnd):
+            return None
+        if not user32.IsWindowVisible(hwnd):
+            return None
+
+        try:
+            dwmapi = ctypes.windll.dwmapi
+            extended = wintypes.RECT()
+            hr = dwmapi.DwmGetWindowAttribute(
+                wintypes.HWND(hwnd),
+                ctypes.c_uint(9),  # DWMWA_EXTENDED_FRAME_BOUNDS
+                ctypes.byref(extended),
+                ctypes.sizeof(extended),
+            )
+            if hr == 0:
+                left = int(extended.left)
+                top = int(extended.top)
+                right = int(extended.right)
+                bottom = int(extended.bottom)
+                if right - left >= 32 and bottom - top >= 32:
+                    return (left, top, right, bottom)
+        except (AttributeError, OSError):
+            pass
+
+        rect = wintypes.RECT()
+        if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            return None
+
+        return (int(rect.left), int(rect.top), int(rect.right), int(rect.bottom))
+
+    def _clamp_rect_to_virtual_screen(
+        self,
+        left: int,
+        top: int,
+        right: int,
+        bottom: int,
+    ) -> tuple[int, int, int, int] | None:
+        virtual_left, virtual_top, virtual_right, virtual_bottom = self._virtual_screen_bounds()
+        left = max(left, virtual_left)
+        top = max(top, virtual_top)
+        right = min(right, virtual_right)
+        bottom = min(bottom, virtual_bottom)
+        if right - left < 32 or bottom - top < 32:
+            return None
+        return (left, top, right, bottom)
+
+    def _expand_rect_with_padding(
+        self,
+        left: int,
+        top: int,
+        right: int,
+        bottom: int,
+        padding: int,
+    ) -> tuple[int, int, int, int] | None:
+        if padding <= 0:
+            return self._clamp_rect_to_virtual_screen(left, top, right, bottom)
+        return self._clamp_rect_to_virtual_screen(
+            left - padding,
+            top - padding,
+            right + padding,
+            bottom + padding,
+        )
+
+    def _ensure_even_rect_dimensions(
+        self,
+        left: int,
+        top: int,
+        right: int,
+        bottom: int,
+    ) -> tuple[int, int, int, int]:
+        virtual_left, virtual_top, virtual_right, virtual_bottom = self._virtual_screen_bounds()
+
+        if (right - left) % 2 != 0:
+            if right < virtual_right:
+                right += 1
+            elif left > virtual_left:
+                left -= 1
+            else:
+                right -= 1
+
+        if (bottom - top) % 2 != 0:
+            if bottom < virtual_bottom:
+                bottom += 1
+            elif top > virtual_top:
+                top -= 1
+            else:
+                bottom -= 1
+
+        return (left, top, right, bottom)
+
+    def _virtual_screen_bounds(self) -> tuple[int, int, int, int]:
+        user32 = ctypes.windll.user32
+        virtual_x = int(user32.GetSystemMetrics(76))  # SM_XVIRTUALSCREEN
+        virtual_y = int(user32.GetSystemMetrics(77))  # SM_YVIRTUALSCREEN
+        virtual_w = int(user32.GetSystemMetrics(78))  # SM_CXVIRTUALSCREEN
+        virtual_h = int(user32.GetSystemMetrics(79))  # SM_CYVIRTUALSCREEN
+        max_x = virtual_x + max(virtual_w, 1)
+        max_y = virtual_y + max(virtual_h, 1)
+        return (virtual_x, virtual_y, max_x, max_y)
 
     def _window_title_exists(self, window_title: str) -> bool:
         return self._find_window_handle(window_title) is not None
