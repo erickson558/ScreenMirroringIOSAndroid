@@ -642,10 +642,13 @@ class UxPlayService:
             )
             return
 
-        if (
-            "raop_rtp_mirror->running is no longer true" not in low
-            and "raop_rtp_mirror error in accept" not in low
-        ):
+        has_running_stopped = "raop_rtp_mirror->running is no longer true" in low
+        has_connection_error = (
+            "raop_rtp_mirror error in accept" in low
+            or "httpd error in parsing: hpe_closed_connection" in low
+        )
+
+        if not has_running_stopped and not has_connection_error:
             return
 
         with self._lock:
@@ -653,8 +656,14 @@ class UxPlayService:
 
         if started_at <= 0.0:
             return
-        if now - started_at > 120:
-            return
+
+        if has_running_stopped:
+            with self._lock:
+                # Mark session as closed to avoid stale recovery triggers while idle.
+                self._mirror_started_at[key] = 0.0
+            if now - started_at > 120:
+                return
+
         if self._should_suppress_auto_recovery(now):
             return
 
