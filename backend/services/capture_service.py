@@ -114,12 +114,17 @@ class CaptureService:
             early_output = ""
             early_code: int | None = None
             selected_source = candidate_sources[0]
+            selected_region: tuple[int, int, int, int] | None = None
             started = False
 
             for source_arg in candidate_sources:
                 source_for_ffmpeg = source_arg
+                capture_region: tuple[int, int, int, int] | None = None
                 if mode == "window":
-                    if source_arg.startswith("title="):
+                    capture_region = self._resolve_window_region(source_arg)
+                    if capture_region is not None:
+                        source_for_ffmpeg = "desktop"
+                    elif source_arg.startswith("title="):
                         candidate_title = source_arg.removeprefix("title=")
                         if not self._window_title_exists(candidate_title):
                             continue
@@ -131,6 +136,7 @@ class CaptureService:
                         source_for_ffmpeg,
                         output_path,
                         fps,
+                        capture_region=capture_region,
                     )
                     process = self._spawn_record_process(
                         command=command,
@@ -142,6 +148,7 @@ class CaptureService:
                     exited_early, early_output, early_code = self._check_early_startup_failure(process)
                     if not exited_early:
                         selected_source = source_arg
+                        selected_region = capture_region
                         started = True
                         break
                     if mode == "window" and self._is_window_not_found_error(early_output):
@@ -162,10 +169,11 @@ class CaptureService:
             if mode == "window" and selected_source.startswith("title=") and selected_source != candidate_sources[0]:
                 selected_title = selected_source.removeprefix("title=")
                 self._emit_log(f"[PISTA] Se detecto la ventana de video como '{selected_title}' para la grabacion.")
-            if mode == "window" and selected_source.startswith("hwnd="):
+            if mode == "window" and selected_region is not None:
+                x, y, width, height = selected_region
                 self._emit_log(
-                    "[PISTA] Grabacion vinculada a la ventana D3D por identificador interno (HWND); "
-                    "seguira la ventana aunque cambie de posicion en la pantalla."
+                    "[PISTA] Grabacion de ventana por region de escritorio "
+                    f"({width}x{height} en x={x}, y={y}) para capturar correctamente render D3D."
                 )
             if process is None:
                 raise RuntimeError("No se pudo iniciar la grabacion.")
@@ -371,8 +379,22 @@ class CaptureService:
         source_arg: str,
         output_path: Path,
         fps: int,
+        capture_region: tuple[int, int, int, int] | None = None,
     ) -> list[str]:
         target_fps = max(15, min(fps, 60))
+        capture_input_args: list[str] = []
+        if capture_region is not None:
+            x, y, width, height = capture_region
+            capture_input_args.extend(
+                [
+                    "-offset_x",
+                    str(x),
+                    "-offset_y",
+                    str(y),
+                    "-video_size",
+                    f"{width}x{height}",
+                ]
+            )
 
         return [
             str(ffmpeg_path),
@@ -388,6 +410,7 @@ class CaptureService:
             "1024",
             "-draw_mouse",
             "0",
+            *capture_input_args,
             "-i",
             source_arg,
             "-an",
@@ -410,15 +433,44 @@ class CaptureService:
             str(output_path),
         ]
 
-    def _resolve_window_region(self, window_title: str) -> tuple[int, int, int, int] | None:
+    def _resolve_window_region(self, window_source: str) -> tuple[int, int, int, int] | None:
         if os.name != "nt":
             return None
 
-        hwnd = self._find_window_handle(window_title)
-        if hwnd is None:
+        source = " ".join(window_source.split()).strip()
+        if not source:
             return None
 
+        hwnd: int | None = None
+        low_source = source.lower()
+        if low_source.startswith("hwnd="):
+            hwnd = self._parse_hwnd_value(source.split("=", 1)[1])
+        elif low_source.startswith("title="):
+            hwnd = self._find_window_handle(source.split("=", 1)[1])
+        else:
+            hwnd = self._find_window_handle(source)
+
+        if hwnd is None:
+            return None
+        return self._resolve_window_region_by_handle(hwnd)
+
+    def _parse_hwnd_value(self, raw_value: str) -> int | None:
+        value = " ".join(raw_value.split()).strip()
+        if not value:
+            return None
+        try:
+            hwnd = int(value, 0)
+        except ValueError:
+            return None
+        if hwnd <= 0:
+            return None
+        return hwnd
+
+    def _resolve_window_region_by_handle(self, hwnd: int) -> tuple[int, int, int, int] | None:
         user32 = ctypes.windll.user32
+        if not user32.IsWindowVisible(hwnd):
+            return None
+
         rect = wintypes.RECT()
         if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
             return None
