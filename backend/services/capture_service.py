@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+from ctypes import wintypes
 import os
 from pathlib import Path
 import shutil
@@ -122,6 +123,8 @@ class CaptureService:
                     capture_region = self._resolve_window_region(candidate_title)
                     if capture_region is not None:
                         source_for_ffmpeg = "desktop"
+                    elif not self._window_title_exists(candidate_title):
+                        continue
 
                 command = self._build_record_command(
                     ffmpeg_path,
@@ -404,6 +407,46 @@ class CaptureService:
         if os.name != "nt":
             return None
 
+        hwnd = self._find_window_handle(window_title)
+        if hwnd is None:
+            return None
+
+        user32 = ctypes.windll.user32
+        rect = wintypes.RECT()
+        if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            return None
+
+        left = int(rect.left)
+        top = int(rect.top)
+        right = int(rect.right)
+        bottom = int(rect.bottom)
+
+        virtual_x = int(user32.GetSystemMetrics(76))  # SM_XVIRTUALSCREEN
+        virtual_y = int(user32.GetSystemMetrics(77))  # SM_YVIRTUALSCREEN
+        virtual_w = int(user32.GetSystemMetrics(78))  # SM_CXVIRTUALSCREEN
+        virtual_h = int(user32.GetSystemMetrics(79))  # SM_CYVIRTUALSCREEN
+        max_x = virtual_x + virtual_w
+        max_y = virtual_y + virtual_h
+
+        left = max(left, virtual_x)
+        top = max(top, virtual_y)
+        right = min(right, max_x)
+        bottom = min(bottom, max_y)
+
+        width = right - left
+        height = bottom - top
+        if width < 32 or height < 32:
+            return None
+
+        return (left, top, width, height)
+
+    def _window_title_exists(self, window_title: str) -> bool:
+        return self._find_window_handle(window_title) is not None
+
+    def _find_window_handle(self, window_title: str) -> int | None:
+        if os.name != "nt":
+            return None
+
         normalized_target = " ".join(window_title.split()).strip().lower()
         if not normalized_target:
             return None
@@ -437,34 +480,7 @@ class CaptureService:
         user32.EnumWindows(_collect, 0)
         if not matches:
             return None
-
-        rect = ctypes.wintypes.RECT()
-        if not user32.GetWindowRect(matches[0], ctypes.byref(rect)):
-            return None
-
-        left = int(rect.left)
-        top = int(rect.top)
-        right = int(rect.right)
-        bottom = int(rect.bottom)
-
-        virtual_x = int(user32.GetSystemMetrics(76))  # SM_XVIRTUALSCREEN
-        virtual_y = int(user32.GetSystemMetrics(77))  # SM_YVIRTUALSCREEN
-        virtual_w = int(user32.GetSystemMetrics(78))  # SM_CXVIRTUALSCREEN
-        virtual_h = int(user32.GetSystemMetrics(79))  # SM_CYVIRTUALSCREEN
-        max_x = virtual_x + virtual_w
-        max_y = virtual_y + virtual_h
-
-        left = max(left, virtual_x)
-        top = max(top, virtual_y)
-        right = min(right, max_x)
-        bottom = min(bottom, max_y)
-
-        width = right - left
-        height = bottom - top
-        if width < 32 or height < 32:
-            return None
-
-        return (left, top, width, height)
+        return matches[0]
 
     def _finalize_recording_output(self, source_path: Path, target_path: Path) -> Path:
         if not source_path.exists():
@@ -571,7 +587,7 @@ class CaptureService:
             startupinfo=startupinfo,
         )
 
-    def _check_early_startup_failure(self, process: subprocess.Popen[str], timeout: float = 0.85) -> tuple[bool, str, int | None]:
+    def _check_early_startup_failure(self, process: subprocess.Popen[str], timeout: float = 1.8) -> tuple[bool, str, int | None]:
         try:
             exit_code = process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
