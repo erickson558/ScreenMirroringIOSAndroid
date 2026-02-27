@@ -395,6 +395,8 @@ class CaptureService:
             "-i",
             source_arg,
             "-an",
+            "-vf",
+            "crop=trunc(iw/2)*2:trunc(ih/2)*2",
             "-c:v",
             "libx264",
             "-preset",
