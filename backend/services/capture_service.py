@@ -458,40 +458,17 @@ class CaptureService:
         if os.name != "nt":
             return None
 
-        normalized_target = " ".join(window_title.split()).strip().lower()
+        normalized_target = " ".join(window_title.split()).strip()
         if not normalized_target:
             return None
 
         user32 = ctypes.windll.user32
-        matches: list[int] = []
-
-        enum_windows_proc = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
-
-        @enum_windows_proc
-        def _collect(hwnd: int, _lparam: int) -> int:
-            if not user32.IsWindowVisible(hwnd):
-                return 1
-            length = user32.GetWindowTextLengthW(hwnd)
-            if length <= 0:
-                return 1
-            text_buf = ctypes.create_unicode_buffer(length + 1)
-            user32.GetWindowTextW(hwnd, text_buf, length + 1)
-            title = " ".join(text_buf.value.split()).strip()
-            if not title:
-                return 1
-
-            low = title.lower()
-            if low == normalized_target:
-                matches.insert(0, hwnd)
-                return 0
-            if normalized_target in low:
-                matches.append(hwnd)
-            return 1
-
-        user32.EnumWindows(_collect, 0)
-        if not matches:
+        hwnd = int(user32.FindWindowW(None, normalized_target))
+        if hwnd <= 0:
             return None
-        return matches[0]
+        if not user32.IsWindowVisible(hwnd):
+            return None
+        return hwnd
 
     def _finalize_recording_output(self, source_path: Path, target_path: Path) -> Path:
         if not source_path.exists():
