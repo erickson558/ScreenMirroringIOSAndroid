@@ -528,6 +528,19 @@ class UxPlayService:
             self._schedule_window_probe(process)
             return
 
+        if "gstreamer error: output window was closed" in low:
+            with self._lock:
+                started_at = self._mirror_started_at.get(key, 0.0)
+
+            if started_at > 0.0 and self._should_suppress_auto_recovery(now):
+                return
+
+            self._request_auto_recovery(
+                trigger_line="GStreamer reporto cierre de la ventana de video durante mirroring.",
+                prefer_d3d11=True,
+            )
+            return
+
         if "invalid ntp_time < gst_video_pipeline_base_time" in low:
             with self._lock:
                 started_at = self._mirror_started_at.get(key, 0.0)
@@ -562,7 +575,7 @@ class UxPlayService:
 
         if started_at <= 0.0:
             return
-        if now - started_at > 45:
+        if now - started_at > 120:
             return
         if self._should_suppress_auto_recovery(now):
             return
