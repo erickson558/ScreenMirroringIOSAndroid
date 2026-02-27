@@ -114,19 +114,15 @@ class CaptureService:
             early_output = ""
             early_code: int | None = None
             selected_source = candidate_sources[0]
-            selected_region: tuple[int, int, int, int] | None = None
             started = False
 
             for source_arg in candidate_sources:
                 source_for_ffmpeg = source_arg
-                capture_region: tuple[int, int, int, int] | None = None
                 if mode == "window":
-                    candidate_title = source_arg.removeprefix("title=")
-                    capture_region = self._resolve_window_region(candidate_title)
-                    if capture_region is not None:
-                        source_for_ffmpeg = "desktop"
-                    elif not self._window_title_exists(candidate_title):
-                        continue
+                    if source_arg.startswith("title="):
+                        candidate_title = source_arg.removeprefix("title=")
+                        if not self._window_title_exists(candidate_title):
+                            continue
 
                 max_attempts = 2 if mode == "window" else 1
                 for attempt in range(1, max_attempts + 1):
@@ -135,7 +131,6 @@ class CaptureService:
                         source_for_ffmpeg,
                         output_path,
                         fps,
-                        capture_region=capture_region,
                     )
                     process = self._spawn_record_process(
                         command=command,
@@ -147,7 +142,6 @@ class CaptureService:
                     exited_early, early_output, early_code = self._check_early_startup_failure(process)
                     if not exited_early:
                         selected_source = source_arg
-                        selected_region = capture_region
                         started = True
                         break
                     if mode == "window" and self._is_window_not_found_error(early_output):
@@ -165,14 +159,13 @@ class CaptureService:
                 details = self._summarize_early_failure(early_output, early_code)
                 raise RuntimeError(f"La grabacion no pudo iniciar: {details}")
 
-            if mode == "window" and selected_source != candidate_sources[0]:
+            if mode == "window" and selected_source.startswith("title=") and selected_source != candidate_sources[0]:
                 selected_title = selected_source.removeprefix("title=")
                 self._emit_log(f"[PISTA] Se detecto la ventana de video como '{selected_title}' para la grabacion.")
-            if mode == "window" and selected_region is not None:
-                x, y, w, h = selected_region
+            if mode == "window" and selected_source.startswith("hwnd="):
                 self._emit_log(
-                    "[PISTA] Grabacion por region de ventana activa "
-                    f"({w}x{h} en x={x}, y={y}) para mayor estabilidad con Direct3D11."
+                    "[PISTA] Grabacion vinculada a la ventana D3D por identificador interno (HWND); "
+                    "seguira la ventana aunque cambie de posicion en la pantalla."
                 )
             if process is None:
                 raise RuntimeError("No se pudo iniciar la grabacion.")
@@ -347,7 +340,25 @@ class CaptureService:
             unique_titles.append(clean)
         if not unique_titles:
             unique_titles.append("Direct3D11 renderer")
-        return [f"title={title}" for title in unique_titles]
+
+        sources: list[str] = []
+        seen_sources: set[str] = set()
+        for title in unique_titles:
+            hwnd = self._find_window_handle(title)
+            if hwnd is not None:
+                for hwnd_source in (f"hwnd=0x{hwnd:X}", f"hwnd={hwnd}"):
+                    if hwnd_source in seen_sources:
+                        continue
+                    seen_sources.add(hwnd_source)
+                    sources.append(hwnd_source)
+
+            title_source = f"title={title}"
+            if title_source in seen_sources:
+                continue
+            seen_sources.add(title_source)
+            sources.append(title_source)
+
+        return sources
 
     def _build_capture_env(self, ffmpeg_path: Path) -> dict[str, str]:
         env = os.environ.copy()
@@ -360,22 +371,8 @@ class CaptureService:
         source_arg: str,
         output_path: Path,
         fps: int,
-        capture_region: tuple[int, int, int, int] | None = None,
     ) -> list[str]:
         target_fps = max(15, min(fps, 60))
-        capture_input_args: list[str] = []
-        if capture_region is not None:
-            x, y, width, height = capture_region
-            capture_input_args.extend(
-                [
-                    "-offset_x",
-                    str(x),
-                    "-offset_y",
-                    str(y),
-                    "-video_size",
-                    f"{width}x{height}",
-                ]
-            )
 
         return [
             str(ffmpeg_path),
@@ -391,7 +388,6 @@ class CaptureService:
             "1024",
             "-draw_mouse",
             "0",
-            *capture_input_args,
             "-i",
             source_arg,
             "-an",
@@ -593,7 +589,11 @@ class CaptureService:
 
     def _is_window_not_found_error(self, text: str) -> bool:
         low = text.lower()
-        return "can't find window" in low or "error opening input file title=" in low
+        return (
+            "can't find window" in low
+            or "error opening input file title=" in low
+            or "error opening input file hwnd=" in low
+        )
 
     def _is_retryable_startup_error(self, text: str) -> bool:
         low = text.lower()
@@ -609,7 +609,11 @@ class CaptureService:
     def _summarize_early_failure(self, output: str, exit_code: int | None) -> str:
         cleaned = " ".join((output or "").strip().split())
         low = cleaned.lower()
-        if "can't find window" in low or "error opening input file title=" in low:
+        if (
+            "can't find window" in low
+            or "error opening input file title=" in low
+            or "error opening input file hwnd=" in low
+        ):
             return (
                 "No se encontro la ventana de UxPlay. Verifica que el mirroring este activo "
                 "y que el titulo de ventana coincida."
