@@ -282,20 +282,25 @@ class UxPlayService:
 
         if vpn_active:
             primary_args = list(runtime_args)
-            if self._is_wireless_adapter_name(adapter_name):
-                primary_args = ["-m", mac, *primary_args]
-                primary_hint = (
-                    "[PISTA] VPN activa detectada: se prioriza instancia unica con MAC LAN fija "
-                    f"{mac} ({adapter_name}) para mejorar descubrimiento desde iPhone."
-                )
-            else:
-                primary_hint = (
-                    "[PISTA] VPN activa detectada con adaptador cableado activo: se mantiene anuncio "
-                    "global (MAC del sistema) para mejorar descubrimiento AirPlay."
-                )
             if not self._has_explicit_sync_arg(primary_args):
                 primary_args = ["-vsync", "no", *primary_args]
-            return [(receiver_name, primary_args, primary_hint)]
+
+            secondary_name = self._build_secondary_receiver_name(receiver_name, " [LAN]")
+            secondary_args = self._with_replaced_port(primary_args, 17000)
+            secondary_args = ["-m", mac, *secondary_args]
+
+            primary_hint = (
+                "[PISTA] VPN activa detectada: se prioriza anuncio principal global "
+                f"'{receiver_name}' para mejorar visibilidad en iPhone."
+            )
+            secondary_hint = (
+                f"[PISTA] Se inicia anuncio secundario '{secondary_name}' con MAC LAN fija "
+                f"{mac} ({adapter_name}) y puertos alternos."
+            )
+            return [
+                (receiver_name, primary_args, primary_hint),
+                (secondary_name, secondary_args, secondary_hint),
+            ]
 
         primary_hint = f"[PISTA] MAC AirPlay fijada automaticamente a {mac} ({adapter_name})."
         primary_plan = (receiver_name, ["-m", mac, *runtime_args], primary_hint)
@@ -458,6 +463,33 @@ class UxPlayService:
     def _is_wireless_adapter_name(self, adapter_name: str) -> bool:
         low = adapter_name.lower()
         return "wi-fi" in low or "wifi" in low or "wlan" in low or "wireless" in low
+
+    def _build_secondary_receiver_name(self, receiver_name: str, suffix: str) -> str:
+        max_base_length = 63 - len(suffix)
+        if max_base_length <= 0:
+            return receiver_name
+        trimmed_name = receiver_name[:max_base_length].rstrip()
+        if not trimmed_name:
+            return receiver_name
+        return f"{trimmed_name}{suffix}"
+
+    def _with_replaced_port(self, args: list[str], port: int) -> list[str]:
+        filtered: list[str] = []
+        index = 0
+        while index < len(args):
+            token = args[index]
+            low = token.lower()
+            if low == "-p":
+                index += 1
+                if index < len(args) and not args[index].startswith("-"):
+                    index += 1
+                continue
+            if low.startswith("-p") and len(low) > 2 and low[2].isdigit():
+                index += 1
+                continue
+            filtered.append(token)
+            index += 1
+        return ["-p", str(port), *filtered]
 
     def _process_key(self, process: subprocess.Popen[str]) -> int:
         return process.pid if process.pid is not None else id(process)
