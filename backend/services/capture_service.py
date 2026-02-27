@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import os
 from pathlib import Path
 import shutil
@@ -111,9 +112,24 @@ class CaptureService:
             early_output = ""
             early_code: int | None = None
             selected_source = candidate_sources[0]
+            selected_region: tuple[int, int, int, int] | None = None
 
             for source_arg in candidate_sources:
-                command = self._build_record_command(ffmpeg_path, source_arg, output_path, fps)
+                source_for_ffmpeg = source_arg
+                capture_region: tuple[int, int, int, int] | None = None
+                if mode == "window":
+                    candidate_title = source_arg.removeprefix("title=")
+                    capture_region = self._resolve_window_region(candidate_title)
+                    if capture_region is not None:
+                        source_for_ffmpeg = "desktop"
+
+                command = self._build_record_command(
+                    ffmpeg_path,
+                    source_for_ffmpeg,
+                    output_path,
+                    fps,
+                    capture_region=capture_region,
+                )
                 process = self._spawn_record_process(
                     command=command,
                     ffmpeg_path=ffmpeg_path,
@@ -124,6 +140,7 @@ class CaptureService:
                 exited_early, early_output, early_code = self._check_early_startup_failure(process)
                 if not exited_early:
                     selected_source = source_arg
+                    selected_region = capture_region
                     break
                 if mode == "window" and self._is_window_not_found_error(early_output):
                     continue
@@ -137,6 +154,12 @@ class CaptureService:
             if mode == "window" and selected_source != candidate_sources[0]:
                 selected_title = selected_source.removeprefix("title=")
                 self._emit_log(f"[PISTA] Se detecto la ventana de video como '{selected_title}' para la grabacion.")
+            if mode == "window" and selected_region is not None:
+                x, y, w, h = selected_region
+                self._emit_log(
+                    "[PISTA] Grabacion por region de ventana activa "
+                    f"({w}x{h} en x={x}, y={y}) para mayor estabilidad con Direct3D11."
+                )
             if process is None:
                 raise RuntimeError("No se pudo iniciar la grabacion.")
 
@@ -317,8 +340,29 @@ class CaptureService:
         env["PATH"] = str(ffmpeg_path.parent) + os.pathsep + env.get("PATH", "")
         return env
 
-    def _build_record_command(self, ffmpeg_path: Path, source_arg: str, output_path: Path, fps: int) -> list[str]:
+    def _build_record_command(
+        self,
+        ffmpeg_path: Path,
+        source_arg: str,
+        output_path: Path,
+        fps: int,
+        capture_region: tuple[int, int, int, int] | None = None,
+    ) -> list[str]:
         target_fps = max(15, min(fps, 60))
+        capture_input_args: list[str] = []
+        if capture_region is not None:
+            x, y, width, height = capture_region
+            capture_input_args.extend(
+                [
+                    "-offset_x",
+                    str(x),
+                    "-offset_y",
+                    str(y),
+                    "-video_size",
+                    f"{width}x{height}",
+                ]
+            )
+
         return [
             str(ffmpeg_path),
             "-hide_banner",
@@ -333,6 +377,7 @@ class CaptureService:
             "1024",
             "-draw_mouse",
             "0",
+            *capture_input_args,
             "-i",
             source_arg,
             "-an",
@@ -341,7 +386,7 @@ class CaptureService:
             "-preset",
             "veryfast",
             "-crf",
-            "21",
+            "18",
             "-pix_fmt",
             "yuv420p",
             "-r",
@@ -354,6 +399,72 @@ class CaptureService:
             "90000",
             str(output_path),
         ]
+
+    def _resolve_window_region(self, window_title: str) -> tuple[int, int, int, int] | None:
+        if os.name != "nt":
+            return None
+
+        normalized_target = " ".join(window_title.split()).strip().lower()
+        if not normalized_target:
+            return None
+
+        user32 = ctypes.windll.user32
+        matches: list[int] = []
+
+        enum_windows_proc = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
+
+        @enum_windows_proc
+        def _collect(hwnd: int, _lparam: int) -> int:
+            if not user32.IsWindowVisible(hwnd):
+                return 1
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length <= 0:
+                return 1
+            text_buf = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, text_buf, length + 1)
+            title = " ".join(text_buf.value.split()).strip()
+            if not title:
+                return 1
+
+            low = title.lower()
+            if low == normalized_target:
+                matches.insert(0, hwnd)
+                return 0
+            if normalized_target in low:
+                matches.append(hwnd)
+            return 1
+
+        user32.EnumWindows(_collect, 0)
+        if not matches:
+            return None
+
+        rect = ctypes.wintypes.RECT()
+        if not user32.GetWindowRect(matches[0], ctypes.byref(rect)):
+            return None
+
+        left = int(rect.left)
+        top = int(rect.top)
+        right = int(rect.right)
+        bottom = int(rect.bottom)
+
+        virtual_x = int(user32.GetSystemMetrics(76))  # SM_XVIRTUALSCREEN
+        virtual_y = int(user32.GetSystemMetrics(77))  # SM_YVIRTUALSCREEN
+        virtual_w = int(user32.GetSystemMetrics(78))  # SM_CXVIRTUALSCREEN
+        virtual_h = int(user32.GetSystemMetrics(79))  # SM_CYVIRTUALSCREEN
+        max_x = virtual_x + virtual_w
+        max_y = virtual_y + virtual_h
+
+        left = max(left, virtual_x)
+        top = max(top, virtual_y)
+        right = min(right, max_x)
+        bottom = min(bottom, max_y)
+
+        width = right - left
+        height = bottom - top
+        if width < 32 or height < 32:
+            return None
+
+        return (left, top, width, height)
 
     def _finalize_recording_output(self, source_path: Path, target_path: Path) -> Path:
         if not source_path.exists():
