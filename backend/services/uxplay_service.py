@@ -285,23 +285,23 @@ class UxPlayService:
             if not self._has_explicit_sync_arg(base_args):
                 base_args = ["-vsync", "no", *base_args]
 
-            # In VPN mode force a fresh/random device ID for the main service name.
-            # This avoids stale iPhone cache entries tied to previous MAC/name pairs.
+            # Keep the user-selected receiver name on the LAN-fixed instance, because
+            # this is usually the one iPhone actually reaches when VPN is active.
             primary_args = self._without_mac_args(base_args)
-            primary_args = ["-m", *primary_args]
+            primary_args = ["-m", mac, *primary_args]
 
-            secondary_name = self._build_secondary_receiver_name(receiver_name, " [LAN]")
+            secondary_name = self._build_secondary_receiver_name(receiver_name, " [VPN]")
             secondary_args = self._without_mac_args(base_args)
             secondary_args = self._with_replaced_port(secondary_args, 17000)
-            secondary_args = ["-m", mac, *secondary_args]
+            secondary_args = ["-m", *secondary_args]
 
             primary_hint = (
-                "[PISTA] VPN activa detectada: se usara MAC aleatoria en anuncio principal "
-                f"'{receiver_name}' para evitar cache de nombre/dispositivo en iPhone."
+                "[PISTA] VPN activa detectada: se fija MAC LAN en anuncio principal "
+                f"'{receiver_name}' ({mac}) para priorizar descubrimiento estable desde iPhone."
             )
             secondary_hint = (
-                f"[PISTA] Se inicia anuncio secundario '{secondary_name}' con MAC LAN fija "
-                f"{mac} ({adapter_name}) y puertos alternos."
+                f"[PISTA] Se inicia anuncio secundario '{secondary_name}' con MAC aleatoria "
+                "en puertos alternos para romper cache de descubrimiento."
             )
             return [
                 (receiver_name, primary_args, primary_hint),
@@ -574,6 +574,13 @@ class UxPlayService:
             "raop_rtp_mirror->running is no longer true" not in low
             and "raop_rtp_mirror error in accept" not in low
         ):
+            return
+
+        if "raop_rtp_mirror error in accept 0 no error" in low:
+            self._emit_log(
+                "[PISTA] Se detecto cierre transitorio de socket AirPlay (accept 0 No error). "
+                "Se espera reconexion sin reinicio forzado."
+            )
             return
 
         with self._lock:
