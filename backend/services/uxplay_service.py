@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ctypes
+from ctypes import wintypes
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -43,6 +45,9 @@ class UxPlayService:
         self._recovery_sequence = 0
         self._recovery_delay_seconds = 2.5
         self._manual_stop_until = 0.0
+        self._window_probe_delay_seconds = 4.5
+        self._window_probe_sequence = 0
+        self._pending_window_probes: dict[int, int] = {}
         self._lock = threading.Lock()
 
     @property
@@ -128,6 +133,7 @@ class UxPlayService:
                 self._reader_threads.clear()
                 self._mirror_started_at.clear()
                 self._ntp_error_counts.clear()
+                self._pending_window_probes.clear()
                 self._scheduled_recovery_id = None
                 raise
 
@@ -189,6 +195,7 @@ class UxPlayService:
                 self._reader_threads.clear()
                 self._mirror_started_at.clear()
                 self._ntp_error_counts.clear()
+                self._pending_window_probes.clear()
                 self._scheduled_recovery_id = None
                 did_clear = True
 
@@ -214,6 +221,7 @@ class UxPlayService:
             self._reader_threads.pop(key, None)
             started_at = self._mirror_started_at.pop(key, 0.0)
             self._ntp_error_counts.pop(key, None)
+            self._pending_window_probes.pop(key, None)
             if removed and not self._processes:
                 should_emit_state = True
 
@@ -451,6 +459,7 @@ class UxPlayService:
             self._reader_threads.pop(key, None)
             self._mirror_started_at.pop(key, None)
             self._ntp_error_counts.pop(key, None)
+            self._pending_window_probes.pop(key, None)
 
     def _handle_stream_health(self, process: subprocess.Popen[str], line: str) -> None:
         low = line.lower()
@@ -469,6 +478,7 @@ class UxPlayService:
                 self._emit_log(
                     "[PISTA] Se detecto reconexion AirPlay. Se cancela reinicio automatico pendiente."
                 )
+            self._schedule_window_probe(process)
             return
 
         if "invalid ntp_time < gst_video_pipeline_base_time" in low:
@@ -512,6 +522,106 @@ class UxPlayService:
 
         self._request_auto_recovery(trigger_line=line)
 
+    def _schedule_window_probe(self, process: subprocess.Popen[str]) -> None:
+        if os.name != "nt":
+            return
+
+        key = self._process_key(process)
+        with self._lock:
+            self._window_probe_sequence += 1
+            probe_id = self._window_probe_sequence
+            self._pending_window_probes[key] = probe_id
+
+        def probe() -> None:
+            time.sleep(self._window_probe_delay_seconds)
+
+            with self._lock:
+                current_probe_id = self._pending_window_probes.get(key)
+
+            if current_probe_id != probe_id:
+                return
+
+            if process.poll() is not None:
+                with self._lock:
+                    self._pending_window_probes.pop(key, None)
+                return
+
+            if self._has_visible_window_for_process(process):
+                with self._lock:
+                    self._pending_window_probes.pop(key, None)
+                return
+
+            with self._lock:
+                self._pending_window_probes.pop(key, None)
+
+            if self._should_suppress_auto_recovery():
+                return
+
+            self._emit_log(
+                "[ADVERTENCIA] Mirroring activo sin ventana de video visible en PC. "
+                "Se iniciara recuperacion automatica."
+            )
+            self._request_auto_recovery(
+                trigger_line="Mirroring iniciado sin ventana visible detectado por sonda local.",
+                prefer_d3d11=True,
+            )
+
+        threading.Thread(target=probe, daemon=True).start()
+
+    def _has_visible_window_for_process(self, process: subprocess.Popen[str]) -> bool:
+        if os.name != "nt":
+            return False
+
+        pid = process.pid or 0
+        if pid <= 0:
+            return False
+
+        try:
+            user32 = ctypes.windll.user32
+        except AttributeError:
+            return False
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        visible_found = [False]
+
+        def enum_proc(hwnd: int, _lparam: int) -> bool:
+            if not user32.IsWindowVisible(hwnd):
+                return True
+
+            owner_pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner_pid))
+            if int(owner_pid.value) != pid:
+                return True
+
+            title_len = int(user32.GetWindowTextLengthW(hwnd))
+            if title_len <= 0:
+                return True
+
+            buffer = ctypes.create_unicode_buffer(title_len + 1)
+            user32.GetWindowTextW(hwnd, buffer, title_len + 1)
+            title = buffer.value.strip()
+            if not title:
+                return True
+
+            rect = wintypes.RECT()
+            if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+                return True
+
+            width = int(rect.right) - int(rect.left)
+            height = int(rect.bottom) - int(rect.top)
+            if width < 120 or height < 120:
+                return True
+
+            visible_found[0] = True
+            return False
+
+        try:
+            user32.EnumWindows(WNDENUMPROC(enum_proc), 0)
+        except (AttributeError, OSError):
+            return False
+
+        return visible_found[0]
+
     def _maybe_recover_on_early_exit(self, exit_code: int, started_at: float) -> None:
         if exit_code == 0 or started_at <= 0.0:
             return
@@ -531,7 +641,7 @@ class UxPlayService:
         with self._lock:
             return instant < self._manual_stop_until
 
-    def _request_auto_recovery(self, trigger_line: str) -> None:
+    def _request_auto_recovery(self, trigger_line: str, prefer_d3d11: bool = False) -> None:
         with self._lock:
             if self._auto_recovery_in_progress:
                 return
@@ -567,12 +677,20 @@ class UxPlayService:
                     self._auto_recovery_attempts += 1
                     attempt = self._auto_recovery_attempts
 
-                recovery_args = self._build_recovery_args(list(request.extra_args), attempt)
+                recovery_args = self._build_recovery_args(
+                    list(request.extra_args),
+                    attempt,
+                    prefer_d3d11=prefer_d3d11,
+                )
                 uses_stable_fallback = recovery_args != list(request.extra_args)
                 self._emit_log(
                     f"[ADVERTENCIA] Reiniciando receptor automaticamente (intento {attempt}/{self._max_auto_recovery_attempts})."
                 )
-                if uses_stable_fallback:
+                if uses_stable_fallback and prefer_d3d11:
+                    self._emit_log(
+                        "[PISTA] Recuperacion automatica: se forzara videosink D3D11 para recuperar ventana visible."
+                    )
+                elif uses_stable_fallback:
                     self._emit_log(
                         "[PISTA] Recuperacion automatica: se usara render estable sin DX11 para priorizar apertura de ventana."
                     )
@@ -596,9 +714,15 @@ class UxPlayService:
 
         threading.Thread(target=recover, daemon=True).start()
 
-    def _build_recovery_args(self, args: list[str], attempt: int) -> list[str]:
+    def _build_recovery_args(self, args: list[str], attempt: int, prefer_d3d11: bool = False) -> list[str]:
         if attempt <= 0:
             return args
+        if prefer_d3d11:
+            forced = self._set_videosink_arg(args, "d3d11videosink")
+            lowered = [token.lower() for token in forced]
+            if "-vsync" not in lowered and "-async" not in lowered:
+                forced.extend(["-vsync", "no"])
+            return forced
         if not self._needs_stable_renderer(args):
             return args
 
@@ -617,6 +741,24 @@ class UxPlayService:
         if "-vsync" not in lowered:
             filtered.extend(["-vsync", "no"])
         return filtered
+
+    def _set_videosink_arg(self, args: list[str], videosink: str) -> list[str]:
+        filtered: list[str] = []
+        index = 0
+        while index < len(args):
+            token = args[index]
+            low = token.lower()
+            if low == "-vs":
+                index += 1
+                if index < len(args) and not args[index].startswith("-"):
+                    index += 1
+                continue
+            if low.startswith("-vs") and len(low) > 3 and not low.startswith("-vsync"):
+                index += 1
+                continue
+            filtered.append(token)
+            index += 1
+        return [*filtered, "-vs", videosink]
 
     def _needs_stable_renderer(self, args: list[str]) -> bool:
         joined = " ".join(args).lower()
