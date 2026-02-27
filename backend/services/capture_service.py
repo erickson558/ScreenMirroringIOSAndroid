@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import threading
 from typing import Callable
@@ -372,10 +373,33 @@ class CaptureService:
             return resolved_target
         except OSError as exc:
             self._emit_log(
-                "[ADVERTENCIA] No se pudo mover la grabacion al destino elegido. "
-                f"Se conserva en: {resolved_source}. Detalle: {exc}"
+                "[ADVERTENCIA] No se pudo mover por reemplazo directo; se intentara copia segura. "
+                f"Detalle: {exc}"
+            )
+
+        try:
+            if resolved_target.exists():
+                resolved_target.unlink()
+            shutil.copy2(resolved_source, resolved_target)
+            if resolved_target.exists():
+                try:
+                    resolved_source.unlink()
+                except OSError:
+                    # Keep source if it cannot be removed; destination already contains the final video.
+                    pass
+                return resolved_target
+        except OSError as copy_exc:
+            self._emit_log(
+                "[ADVERTENCIA] No se pudo copiar la grabacion al destino elegido. "
+                f"Se conserva en: {resolved_source}. Detalle: {copy_exc}"
             )
             return resolved_source
+
+        self._emit_log(
+            "[ADVERTENCIA] El archivo no quedo en el destino elegido tras el intento de guardado. "
+            f"Se conserva en: {resolved_source}"
+        )
+        return resolved_source
 
     def _attempt_repair_recording(self, ffmpeg_path: Path, output_path: Path) -> None:
         if not output_path.exists():
