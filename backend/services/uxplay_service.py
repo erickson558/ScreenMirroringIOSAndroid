@@ -32,6 +32,7 @@ class UxPlayService:
         self._processes: dict[int, subprocess.Popen[str]] = {}
         self._reader_threads: dict[int, threading.Thread] = {}
         self._mirror_started_at: dict[int, float] = {}
+        self._ntp_error_counts: dict[int, int] = {}
         self._last_start_request: _StartRequest | None = None
         self._auto_recovery_in_progress = False
         self._auto_recovery_attempts = 0
@@ -112,6 +113,7 @@ class UxPlayService:
                     key = self._process_key(process)
                     self._processes[key] = process
                     self._mirror_started_at[key] = 0.0
+                    self._ntp_error_counts[key] = 0
                     launched.append((process, instance_name if len(launch_plans) > 1 else None))
                     command_logs.append(" ".join(command))
                     if instance_hint:
@@ -122,6 +124,7 @@ class UxPlayService:
                 self._processes.clear()
                 self._reader_threads.clear()
                 self._mirror_started_at.clear()
+                self._ntp_error_counts.clear()
                 self._scheduled_recovery_id = None
                 raise
 
@@ -180,6 +183,7 @@ class UxPlayService:
                 self._processes.clear()
                 self._reader_threads.clear()
                 self._mirror_started_at.clear()
+                self._ntp_error_counts.clear()
                 self._scheduled_recovery_id = None
                 did_clear = True
 
@@ -204,6 +208,7 @@ class UxPlayService:
             removed = self._processes.pop(key, None) is not None
             self._reader_threads.pop(key, None)
             started_at = self._mirror_started_at.pop(key, 0.0)
+            self._ntp_error_counts.pop(key, None)
             if removed and not self._processes:
                 should_emit_state = True
 
@@ -431,6 +436,7 @@ class UxPlayService:
             self._processes.pop(key, None)
             self._reader_threads.pop(key, None)
             self._mirror_started_at.pop(key, None)
+            self._ntp_error_counts.pop(key, None)
 
     def _handle_stream_health(self, process: subprocess.Popen[str], line: str) -> None:
         low = line.lower()
@@ -441,6 +447,7 @@ class UxPlayService:
             canceled_pending = False
             with self._lock:
                 self._mirror_started_at[key] = now
+                self._ntp_error_counts[key] = 0
                 if self._scheduled_recovery_id is not None:
                     self._scheduled_recovery_id = None
                     canceled_pending = True
@@ -450,7 +457,33 @@ class UxPlayService:
                 )
             return
 
-        if "raop_rtp_mirror->running is no longer true" not in low:
+        if "invalid ntp_time < gst_video_pipeline_base_time" in low:
+            with self._lock:
+                started_at = self._mirror_started_at.get(key, 0.0)
+                count = self._ntp_error_counts.get(key, 0) + 1
+                self._ntp_error_counts[key] = count
+
+            if started_at <= 0.0:
+                return
+            if now - started_at > 22:
+                return
+            if count < 24:
+                return
+            if self._should_suppress_auto_recovery(now):
+                return
+
+            self._request_auto_recovery(
+                trigger_line=(
+                    "Se detectaron errores NTP repetidos al iniciar mirroring "
+                    f"({count} eventos)."
+                )
+            )
+            return
+
+        if (
+            "raop_rtp_mirror->running is no longer true" not in low
+            and "raop_rtp_mirror error in accept" not in low
+        ):
             return
 
         with self._lock:
