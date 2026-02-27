@@ -281,14 +281,20 @@ class UxPlayService:
         vpn_active = self._is_windows_vpn_active()
 
         if vpn_active:
-            primary_args = ["-m", mac, *runtime_args]
+            primary_args = list(runtime_args)
+            if self._is_wireless_adapter_name(adapter_name):
+                primary_args = ["-m", mac, *primary_args]
+                primary_hint = (
+                    "[PISTA] VPN activa detectada: se prioriza instancia unica con MAC LAN fija "
+                    f"{mac} ({adapter_name}) para mejorar descubrimiento desde iPhone."
+                )
+            else:
+                primary_hint = (
+                    "[PISTA] VPN activa detectada con adaptador cableado activo: se mantiene anuncio "
+                    "global (MAC del sistema) para mejorar descubrimiento AirPlay."
+                )
             if not self._has_explicit_sync_arg(primary_args):
                 primary_args = ["-vsync", "no", *primary_args]
-
-            primary_hint = (
-                "[PISTA] VPN activa detectada: se prioriza instancia unica con MAC LAN fija "
-                f"{mac} ({adapter_name}) para mejorar descubrimiento desde iPhone."
-            )
             return [(receiver_name, primary_args, primary_hint)]
 
         primary_hint = f"[PISTA] MAC AirPlay fijada automaticamente a {mac} ({adapter_name})."
@@ -443,11 +449,15 @@ class UxPlayService:
 
     def _adapter_priority(self, adapter_name: str) -> tuple[int, str]:
         low = adapter_name.lower()
-        if "wi-fi" in low or "wifi" in low or "wlan" in low:
+        if self._is_wireless_adapter_name(adapter_name):
             return (0, low)
         if "ethernet" in low:
             return (1, low)
         return (2, low)
+
+    def _is_wireless_adapter_name(self, adapter_name: str) -> bool:
+        low = adapter_name.lower()
+        return "wi-fi" in low or "wifi" in low or "wlan" in low or "wireless" in low
 
     def _process_key(self, process: subprocess.Popen[str]) -> int:
         return process.pid if process.pid is not None else id(process)
