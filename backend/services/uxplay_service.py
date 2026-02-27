@@ -269,17 +269,17 @@ class UxPlayService:
         if not adapters:
             return [(receiver_name, runtime_args, None)]
 
+        adapter_name, mac = adapters[0]
         if len(adapters) == 1:
-            adapter_name, _mac = adapters[0]
-            hint = f"[PISTA] Adaptador de red activo detectado: {adapter_name}."
-            return [(receiver_name, runtime_args, hint)]
+            hint = f"[PISTA] MAC AirPlay fijada automaticamente a {mac} ({adapter_name})."
+            return [(receiver_name, ["-m", mac, *runtime_args], hint)]
 
         adapter_list = ", ".join(name for name, _mac in adapters)
         hint = (
-            "[PISTA] Varias interfaces activas detectadas "
-            f"({adapter_list}). UxPlay anunciara el receptor en interfaces disponibles."
+            f"[PISTA] MAC AirPlay fijada automaticamente a {mac} ({adapter_name}). "
+            f"Interfaces activas detectadas: {adapter_list}."
         )
-        return [(receiver_name, runtime_args, hint)]
+        return [(receiver_name, ["-m", mac, *runtime_args], hint)]
 
     def _has_explicit_mac_arg(self, runtime_args: list[str]) -> bool:
         for token in runtime_args:
