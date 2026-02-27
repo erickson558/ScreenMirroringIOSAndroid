@@ -281,17 +281,23 @@ class UxPlayService:
         vpn_active = self._is_windows_vpn_active()
 
         if vpn_active:
-            primary_args = list(runtime_args)
-            if not self._has_explicit_sync_arg(primary_args):
-                primary_args = ["-vsync", "no", *primary_args]
+            base_args = list(runtime_args)
+            if not self._has_explicit_sync_arg(base_args):
+                base_args = ["-vsync", "no", *base_args]
+
+            # In VPN mode force a fresh/random device ID for the main service name.
+            # This avoids stale iPhone cache entries tied to previous MAC/name pairs.
+            primary_args = self._without_mac_args(base_args)
+            primary_args = ["-m", *primary_args]
 
             secondary_name = self._build_secondary_receiver_name(receiver_name, " [LAN]")
-            secondary_args = self._with_replaced_port(primary_args, 17000)
+            secondary_args = self._without_mac_args(base_args)
+            secondary_args = self._with_replaced_port(secondary_args, 17000)
             secondary_args = ["-m", mac, *secondary_args]
 
             primary_hint = (
-                "[PISTA] VPN activa detectada: se prioriza anuncio principal global "
-                f"'{receiver_name}' para mejorar visibilidad en iPhone."
+                "[PISTA] VPN activa detectada: se usara MAC aleatoria en anuncio principal "
+                f"'{receiver_name}' para evitar cache de nombre/dispositivo en iPhone."
             )
             secondary_hint = (
                 f"[PISTA] Se inicia anuncio secundario '{secondary_name}' con MAC LAN fija "
@@ -490,6 +496,24 @@ class UxPlayService:
             filtered.append(token)
             index += 1
         return ["-p", str(port), *filtered]
+
+    def _without_mac_args(self, args: list[str]) -> list[str]:
+        filtered: list[str] = []
+        index = 0
+        while index < len(args):
+            token = args[index]
+            low = token.lower()
+            if low in {"-m", "--mac"}:
+                index += 1
+                if index < len(args) and not args[index].startswith("-"):
+                    index += 1
+                continue
+            if low.startswith("-m") and len(low) > 2:
+                index += 1
+                continue
+            filtered.append(token)
+            index += 1
+        return filtered
 
     def _process_key(self, process: subprocess.Popen[str]) -> int:
         return process.pid if process.pid is not None else id(process)
