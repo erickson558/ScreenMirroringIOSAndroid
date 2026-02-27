@@ -281,32 +281,15 @@ class UxPlayService:
         vpn_active = self._is_windows_vpn_active()
 
         if vpn_active:
-            base_args = list(runtime_args)
-            if not self._has_explicit_sync_arg(base_args):
-                base_args = ["-vsync", "no", *base_args]
-
-            # Keep the user-selected receiver name on the LAN-fixed instance, because
-            # this is usually the one iPhone actually reaches when VPN is active.
-            primary_args = self._without_mac_args(base_args)
-            primary_args = ["-m", mac, *primary_args]
-
-            secondary_name = self._build_secondary_receiver_name(receiver_name, " [VPN]")
-            secondary_args = self._without_mac_args(base_args)
-            secondary_args = self._with_replaced_port(secondary_args, 17000)
-            secondary_args = ["-m", *secondary_args]
+            primary_args = list(runtime_args)
+            if not self._has_explicit_sync_arg(primary_args):
+                primary_args = ["-vsync", "no", *primary_args]
 
             primary_hint = (
-                "[PISTA] VPN activa detectada: se fija MAC LAN en anuncio principal "
-                f"'{receiver_name}' ({mac}) para priorizar descubrimiento estable desde iPhone."
+                "[PISTA] VPN activa detectada: se prioriza una unica instancia principal con anuncio global "
+                "para mejorar apertura estable de la ventana de video."
             )
-            secondary_hint = (
-                f"[PISTA] Se inicia anuncio secundario '{secondary_name}' con MAC aleatoria "
-                "en puertos alternos para romper cache de descubrimiento."
-            )
-            return [
-                (receiver_name, primary_args, primary_hint),
-                (secondary_name, secondary_args, secondary_hint),
-            ]
+            return [(receiver_name, primary_args, primary_hint)]
 
         primary_hint = f"[PISTA] MAC AirPlay fijada automaticamente a {mac} ({adapter_name})."
         primary_plan = (receiver_name, ["-m", mac, *runtime_args], primary_hint)
@@ -470,51 +453,6 @@ class UxPlayService:
         low = adapter_name.lower()
         return "wi-fi" in low or "wifi" in low or "wlan" in low or "wireless" in low
 
-    def _build_secondary_receiver_name(self, receiver_name: str, suffix: str) -> str:
-        max_base_length = 63 - len(suffix)
-        if max_base_length <= 0:
-            return receiver_name
-        trimmed_name = receiver_name[:max_base_length].rstrip()
-        if not trimmed_name:
-            return receiver_name
-        return f"{trimmed_name}{suffix}"
-
-    def _with_replaced_port(self, args: list[str], port: int) -> list[str]:
-        filtered: list[str] = []
-        index = 0
-        while index < len(args):
-            token = args[index]
-            low = token.lower()
-            if low == "-p":
-                index += 1
-                if index < len(args) and not args[index].startswith("-"):
-                    index += 1
-                continue
-            if low.startswith("-p") and len(low) > 2 and low[2].isdigit():
-                index += 1
-                continue
-            filtered.append(token)
-            index += 1
-        return ["-p", str(port), *filtered]
-
-    def _without_mac_args(self, args: list[str]) -> list[str]:
-        filtered: list[str] = []
-        index = 0
-        while index < len(args):
-            token = args[index]
-            low = token.lower()
-            if low in {"-m", "--mac"}:
-                index += 1
-                if index < len(args) and not args[index].startswith("-"):
-                    index += 1
-                continue
-            if low.startswith("-m") and len(low) > 2:
-                index += 1
-                continue
-            filtered.append(token)
-            index += 1
-        return filtered
-
     def _process_key(self, process: subprocess.Popen[str]) -> int:
         return process.pid if process.pid is not None else id(process)
 
@@ -574,13 +512,6 @@ class UxPlayService:
             "raop_rtp_mirror->running is no longer true" not in low
             and "raop_rtp_mirror error in accept" not in low
         ):
-            return
-
-        if "raop_rtp_mirror error in accept 0 no error" in low:
-            self._emit_log(
-                "[PISTA] Se detecto cierre transitorio de socket AirPlay (accept 0 No error). "
-                "Se espera reconexion sin reinicio forzado."
-            )
             return
 
         with self._lock:
