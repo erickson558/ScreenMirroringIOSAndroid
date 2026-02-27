@@ -21,6 +21,8 @@ class CaptureService:
         self._record_process: subprocess.Popen[str] | None = None
         self._record_output_path: Path | None = None
         self._record_ffmpeg_path: Path | None = None
+        self._record_requested_output_path: Path | None = None
+        self._last_completed_output_path: Path | None = None
         self._record_reader_thread: threading.Thread | None = None
         self._lock = threading.Lock()
 
@@ -140,6 +142,8 @@ class CaptureService:
             self._record_process = process
             self._record_output_path = output_path
             self._record_ffmpeg_path = ffmpeg_path
+            self._record_requested_output_path = None
+            self._last_completed_output_path = None
 
         self._emit_log(f"Grabacion iniciada: {output_path}")
         self._emit_recording_state(True)
@@ -155,13 +159,28 @@ class CaptureService:
         process: subprocess.Popen[str] | None
         recorded_output_path: Path | None
         ffmpeg_path: Path | None
+        requested_output_path: Path | None = None
+        last_completed_output: Path | None
 
         with self._lock:
+            if output_path is not None:
+                requested_output_path = output_path.expanduser().resolve()
+                self._record_requested_output_path = requested_output_path
             process = self._record_process
             recorded_output_path = self._record_output_path
             ffmpeg_path = self._record_ffmpeg_path
+            last_completed_output = self._last_completed_output_path
 
         if process is None or process.poll() is not None:
+            if (
+                requested_output_path is not None
+                and last_completed_output is not None
+                and last_completed_output.exists()
+            ):
+                saved_output = self._finalize_recording_output(last_completed_output, requested_output_path)
+                with self._lock:
+                    self._last_completed_output_path = saved_output
+                self._emit_log(f"Grabación guardada: {saved_output}")
             return
 
         self._emit_log("Deteniendo grabación...")
@@ -186,20 +205,25 @@ class CaptureService:
                 process.wait(timeout=2)
 
         should_emit_state = False
+        pending_output_path: Path | None = None
         with self._lock:
+            pending_output_path = self._record_requested_output_path
             if self._record_process is process:
                 self._record_process = None
                 self._record_output_path = None
                 self._record_ffmpeg_path = None
+                self._record_requested_output_path = None
                 should_emit_state = True
 
         if should_emit_state:
             saved_output = recorded_output_path
-            if saved_output is not None and output_path is not None:
-                saved_output = self._finalize_recording_output(saved_output, output_path)
+            if saved_output is not None and pending_output_path is not None:
+                saved_output = self._finalize_recording_output(saved_output, pending_output_path)
             if forced_stop and saved_output is not None and ffmpeg_path is not None:
                 self._attempt_repair_recording(ffmpeg_path=ffmpeg_path, output_path=saved_output)
             if saved_output is not None:
+                with self._lock:
+                    self._last_completed_output_path = saved_output
                 self._emit_log(f"Grabación guardada: {saved_output}")
             self._emit_recording_state(False)
 
@@ -213,21 +237,30 @@ class CaptureService:
         exit_code = process.wait()
         should_emit_state = False
         output_path: Path | None = None
+        pending_output_path: Path | None = None
 
         with self._lock:
             if self._record_process is process:
                 self._record_process = None
                 output_path = self._record_output_path
+                pending_output_path = self._record_requested_output_path
                 self._record_output_path = None
                 self._record_ffmpeg_path = None
+                self._record_requested_output_path = None
                 should_emit_state = True
 
         if not should_emit_state:
             # Recording was already closed by stop_recording(); avoid duplicate terminal log/state.
             return
 
-        if output_path is not None:
-            self._emit_log(f"Grabación finalizada (código {exit_code}): {output_path}")
+        saved_output = output_path
+        if saved_output is not None and pending_output_path is not None:
+            saved_output = self._finalize_recording_output(saved_output, pending_output_path)
+
+        if saved_output is not None:
+            with self._lock:
+                self._last_completed_output_path = saved_output
+            self._emit_log(f"Grabación finalizada (código {exit_code}): {saved_output}")
         else:
             self._emit_log(f"El proceso de grabación finalizó con código {exit_code}.")
 
@@ -312,7 +345,7 @@ class CaptureService:
             "yuv420p",
             "-r",
             str(target_fps),
-            "-vsync",
+            "-fps_mode",
             "cfr",
             "-movflags",
             "+faststart",
