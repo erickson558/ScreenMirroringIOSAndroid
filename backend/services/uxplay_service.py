@@ -89,6 +89,7 @@ class UxPlayService:
             runtime_args, port_hint = self._ensure_legacy_ports(runtime_args)
             runtime_args, persist_hint = self._ensure_window_persistence(runtime_args)
             runtime_args, size_hint = self._ensure_window_size(runtime_args)
+            runtime_args, renderer_hint = self._ensure_windows_d3d11_renderer(runtime_args)
             launch_plans = self._build_launch_plans(receiver_name, runtime_args, preferred_alias)
             self._last_start_request = _StartRequest(
                 uxplay_path=normalized_path,
@@ -155,6 +156,8 @@ class UxPlayService:
             self._emit_log(persist_hint)
         if size_hint:
             self._emit_log(size_hint)
+        if renderer_hint:
+            self._emit_log(renderer_hint)
         self._emit_log(
             "[PISTA] Espera a ver 'Initialized server socket(s)' antes de conectar en iPhone para evitar doble intento."
         )
@@ -387,6 +390,38 @@ class UxPlayService:
             ),
         )
 
+    def _has_explicit_renderer_args(self, runtime_args: list[str]) -> bool:
+        index = 0
+        while index < len(runtime_args):
+            token = runtime_args[index]
+            low = token.lower()
+            if low in {"-vd", "-vc", "-vs"}:
+                return True
+            if low.startswith("-vd") or low.startswith("-vc"):
+                return True
+            if low.startswith("-vs") and not low.startswith("-vsync"):
+                return True
+            index += 1
+        return False
+
+    def _ensure_windows_d3d11_renderer(self, runtime_args: list[str]) -> tuple[list[str], str | None]:
+        if os.name != "nt":
+            return runtime_args, None
+        if self._has_explicit_renderer_args(runtime_args):
+            return runtime_args, None
+        return (
+            [
+                *runtime_args,
+                "-vd",
+                "d3d11h264dec",
+                "-vc",
+                "d3d11convert",
+                "-vs",
+                "d3d11videosink",
+            ],
+            "[PISTA] Render Direct3D11 activado por defecto para asegurar ventana visible de mirroring.",
+        )
+
     def _resolve_windows_active_adapters(self) -> list[tuple[str, str]]:
         powershell_script = (
             "$ErrorActionPreference='SilentlyContinue';"
@@ -611,6 +646,16 @@ class UxPlayService:
                     self._pending_window_probes.pop(key, None)
                 return
 
+            if self._try_restore_window_for_process(process):
+                time.sleep(0.9)
+                if self._has_visible_window_for_process(process):
+                    with self._lock:
+                        self._pending_window_probes.pop(key, None)
+                    self._emit_log(
+                        "[PISTA] Se restauro una ventana de video oculta/minimizada para este mirroring."
+                    )
+                    return
+
             with self._lock:
                 self._pending_window_probes.pop(key, None)
 
@@ -627,6 +672,55 @@ class UxPlayService:
             )
 
         threading.Thread(target=probe, daemon=True).start()
+
+    def _try_restore_window_for_process(self, process: subprocess.Popen[str]) -> bool:
+        if os.name != "nt":
+            return False
+
+        pid = process.pid or 0
+        if pid <= 0:
+            return False
+
+        try:
+            user32 = ctypes.windll.user32
+        except AttributeError:
+            return False
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        restored = [False]
+
+        def enum_proc(hwnd: int, _lparam: int) -> bool:
+            owner_pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner_pid))
+            if int(owner_pid.value) != pid:
+                return True
+
+            title_len = int(user32.GetWindowTextLengthW(hwnd))
+            if title_len <= 0:
+                return True
+
+            buffer = ctypes.create_unicode_buffer(title_len + 1)
+            user32.GetWindowTextW(hwnd, buffer, title_len + 1)
+            title = buffer.value.strip().lower()
+            if not title:
+                return True
+
+            # Prefer mirroring windows and avoid touching hidden utility windows.
+            if "renderer" not in title and "uxplay" not in title:
+                return True
+
+            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+            user32.ShowWindow(hwnd, 5)  # SW_SHOW
+            user32.SetForegroundWindow(hwnd)
+            restored[0] = True
+            return False
+
+        try:
+            user32.EnumWindows(WNDENUMPROC(enum_proc), 0)
+        except (AttributeError, OSError):
+            return False
+
+        return restored[0]
 
     def _has_visible_window_for_process(self, process: subprocess.Popen[str]) -> bool:
         if os.name != "nt":
