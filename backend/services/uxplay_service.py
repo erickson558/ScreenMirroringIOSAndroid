@@ -281,13 +281,13 @@ class UxPlayService:
         vpn_active = self._is_windows_vpn_active()
 
         if vpn_active:
-            primary_args = list(runtime_args)
+            primary_args = ["-m", mac, *runtime_args]
             if not self._has_explicit_sync_arg(primary_args):
                 primary_args = ["-vsync", "no", *primary_args]
 
             primary_hint = (
-                "[PISTA] VPN activa detectada: se prioriza una unica instancia principal con anuncio global "
-                "para mejorar apertura estable de la ventana de video."
+                "[PISTA] VPN activa detectada: se prioriza instancia unica con MAC LAN fija "
+                f"{mac} ({adapter_name}) para mejorar descubrimiento desde iPhone."
             )
             return [(receiver_name, primary_args, primary_hint)]
 
