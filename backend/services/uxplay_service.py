@@ -21,6 +21,7 @@ class _StartRequest:
     receiver_name: str
     extra_args: tuple[str, ...]
     append_hostname_suffix: bool
+    preferred_interface_alias: str | None
 
 
 class UxPlayService:
@@ -62,6 +63,7 @@ class UxPlayService:
         receiver_name: str,
         extra_args: list[str] | None = None,
         append_hostname_suffix: bool = True,
+        preferred_interface_alias: str | None = None,
         _from_auto_recovery: bool = False,
     ) -> None:
         launched: list[tuple[subprocess.Popen[str], str | None]] = []
@@ -83,15 +85,17 @@ class UxPlayService:
             runtime_args = [arg for arg in runtime_args if arg.lower() != "-nh"]
             if not append_hostname_suffix:
                 runtime_args = ["-nh", *runtime_args]
+            preferred_alias = self._normalize_interface_alias(preferred_interface_alias)
             runtime_args, port_hint = self._ensure_legacy_ports(runtime_args)
             runtime_args, persist_hint = self._ensure_window_persistence(runtime_args)
             runtime_args, size_hint = self._ensure_window_size(runtime_args)
-            launch_plans = self._build_launch_plans(receiver_name, runtime_args)
+            launch_plans = self._build_launch_plans(receiver_name, runtime_args, preferred_alias)
             self._last_start_request = _StartRequest(
                 uxplay_path=normalized_path,
                 receiver_name=receiver_name,
                 extra_args=tuple(runtime_args),
                 append_hostname_suffix=append_hostname_suffix,
+                preferred_interface_alias=preferred_alias,
             )
             if not _from_auto_recovery:
                 self._auto_recovery_attempts = 0
@@ -269,6 +273,7 @@ class UxPlayService:
         self,
         receiver_name: str,
         runtime_args: list[str],
+        preferred_interface_alias: str | None = None,
     ) -> list[tuple[str, list[str], str | None]]:
         if os.name != "nt" or self._has_explicit_mac_arg(runtime_args):
             return [(receiver_name, runtime_args, None)]
@@ -277,21 +282,33 @@ class UxPlayService:
         if not adapters:
             return [(receiver_name, runtime_args, None)]
 
-        adapter_name, mac = adapters[0]
+        preferred_adapter = self._select_preferred_adapter(adapters, preferred_interface_alias)
+        adapter_name, mac = preferred_adapter if preferred_adapter is not None else adapters[0]
         vpn_active = self._is_windows_vpn_active()
 
         if vpn_active:
             primary_args = list(runtime_args)
+            if preferred_adapter is not None:
+                primary_args = ["-m", mac, *primary_args]
             if not self._has_explicit_sync_arg(primary_args):
                 primary_args = ["-vsync", "no", *primary_args]
 
-            primary_hint = (
-                "[PISTA] VPN activa detectada: se prioriza una unica instancia principal con anuncio global "
-                "para mejorar apertura estable de la ventana de video."
-            )
+            if preferred_adapter is not None:
+                primary_hint = (
+                    f"[PISTA] VPN activa detectada: se fija interfaz seleccionada '{adapter_name}' "
+                    f"({mac}) para AirPlay."
+                )
+            else:
+                primary_hint = (
+                    "[PISTA] VPN activa detectada: se prioriza una unica instancia principal con anuncio global "
+                    "para mejorar apertura estable de la ventana de video."
+                )
             return [(receiver_name, primary_args, primary_hint)]
 
-        primary_hint = f"[PISTA] MAC AirPlay fijada automaticamente a {mac} ({adapter_name})."
+        if preferred_adapter is not None:
+            primary_hint = f"[PISTA] Interfaz AirPlay seleccionada manualmente: {adapter_name} ({mac})."
+        else:
+            primary_hint = f"[PISTA] MAC AirPlay fijada automaticamente a {mac} ({adapter_name})."
         primary_plan = (receiver_name, ["-m", mac, *runtime_args], primary_hint)
 
         adapter_list = ", ".join(name for name, _mac in adapters)
@@ -299,7 +316,7 @@ class UxPlayService:
             f"[PISTA] MAC AirPlay fijada automaticamente a {mac} ({adapter_name}). "
             f"Interfaces activas detectadas: {adapter_list}."
         )
-        if len(adapters) > 1:
+        if preferred_adapter is None and len(adapters) > 1:
             primary_plan = (receiver_name, ["-m", mac, *runtime_args], multi_hint)
 
         return [primary_plan]
@@ -448,6 +465,32 @@ class UxPlayService:
         if "ethernet" in low:
             return (1, low)
         return (2, low)
+
+    def list_available_interfaces(self) -> list[tuple[str, str]]:
+        if os.name != "nt":
+            return []
+        return self._resolve_windows_active_adapters()
+
+    def _normalize_interface_alias(self, value: str | None) -> str | None:
+        if value is None:
+            return None
+        alias = " ".join(str(value).split()).strip()
+        if not alias:
+            return None
+        return alias
+
+    def _select_preferred_adapter(
+        self,
+        adapters: list[tuple[str, str]],
+        preferred_interface_alias: str | None,
+    ) -> tuple[str, str] | None:
+        if not preferred_interface_alias:
+            return None
+        preferred = preferred_interface_alias.casefold()
+        for adapter_name, mac in adapters:
+            if adapter_name.casefold() == preferred:
+                return (adapter_name, mac)
+        return None
 
     def _is_wireless_adapter_name(self, adapter_name: str) -> bool:
         low = adapter_name.lower()
@@ -706,6 +749,7 @@ class UxPlayService:
                     receiver_name=request.receiver_name,
                     extra_args=recovery_args,
                     append_hostname_suffix=request.append_hostname_suffix,
+                    preferred_interface_alias=request.preferred_interface_alias,
                     _from_auto_recovery=True,
                 )
             except Exception as exc:  # noqa: BLE001

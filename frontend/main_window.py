@@ -33,6 +33,7 @@ from backend.receiver_profiles import DEFAULT_PROFILE_KEY, get_profile, list_pro
 class MainWindow:
     POLL_INTERVAL_MS = 150
     SAVE_DEBOUNCE_MS = 300
+    _BIND_TARGET_AUTO = "__auto__"
 
     def __init__(
         self,
@@ -83,6 +84,8 @@ class MainWindow:
         self._capture_fps_var = tk.IntVar(value=self._safe_int(saved.get("capture_fps", 30), 30))
         self._device_mode_var = tk.StringVar(value=initial_mode)
         self._device_hint_var = tk.StringVar(value=self._device_mode_description(initial_mode))
+        self._bind_target_var = tk.StringVar(value=str(saved.get("bind_target", self._BIND_TARGET_AUTO)))
+        self._bind_hint_var = tk.StringVar(value=self._tr("bind_hint_auto"))
 
         self._receiver_status_var = tk.StringVar(value=self._tr("receiver_status_stopped"))
         self._record_status_var = tk.StringVar(value=self._tr("record_status_inactive"))
@@ -100,8 +103,12 @@ class MainWindow:
         self._closing = False
         self._about_dialog: tk.Toplevel | None = None
         self._log_history: list[tuple[str, str]] = []
+        self._bind_target_buttons: list[ttk.Radiobutton] = []
+        self._bind_target_choices: list[tuple[str, str]] = []
+        self._startup_receiver_requested = False
 
         self._build_ui()
+        self._refresh_bind_targets(log_change=False)
         self._apply_device_mode_ui(log_change=False)
         self._set_running_state(False)
         self._set_record_state(False)
@@ -113,6 +120,7 @@ class MainWindow:
 
         self._root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._root.after(self.POLL_INTERVAL_MS, self._poll_events)
+        self._root.after(650, self._auto_start_receiver_on_launch)
 
     def _tr(self, key: str, **kwargs: object) -> str:
         return tr(self._language_code, key, **kwargs)
@@ -441,6 +449,23 @@ class MainWindow:
             row=4, column=0, columnspan=3, sticky="w"
         )
 
+        ttk.Label(card, text=self._tr("lbl_bind_interface"), underline=0, style="Card.TLabel").grid(
+            row=5, column=0, sticky="nw", padx=(0, 8), pady=(8, 0)
+        )
+        self._bind_targets_frame = ttk.Frame(card)
+        self._bind_targets_frame.grid(row=5, column=1, columnspan=2, sticky="w", pady=(8, 0))
+
+        self._btn_refresh_bind_targets = ttk.Button(
+            card,
+            text=self._tr("btn_refresh_bind_targets"),
+            style="Glass.TButton",
+            command=self._on_refresh_bind_targets,
+        )
+        self._btn_refresh_bind_targets.grid(row=6, column=2, sticky="e", pady=(4, 0))
+        ttk.Label(card, textvariable=self._bind_hint_var, style="Hint.TLabel", wraplength=320, justify="left").grid(
+            row=6, column=0, columnspan=2, sticky="w", pady=(4, 0)
+        )
+
     def _build_card_stream(self, parent: ttk.Frame) -> None:
         card = ttk.LabelFrame(parent, text=self._tr("card_stream_latency"), style="Card.TLabelframe", padding=10)
         card.pack(fill="x", pady=(0, 8))
@@ -513,6 +538,90 @@ class MainWindow:
             command=self._clear_logs,
         )
         self._btn_clear.grid(row=2, column=2, sticky="e")
+
+    def _normalize_bind_target_key(self, key: object) -> str:
+        raw = str(key or "").strip()
+        if raw.lower() == self._BIND_TARGET_AUTO:
+            return self._BIND_TARGET_AUTO
+        if raw.startswith("if:") and len(raw) > 3:
+            return raw
+        return self._BIND_TARGET_AUTO
+
+    def _selected_bind_interface_alias(self) -> str | None:
+        selected = self._normalize_bind_target_key(self._bind_target_var.get())
+        if selected == self._BIND_TARGET_AUTO:
+            return None
+        if selected.startswith("if:"):
+            return selected[3:]
+        return None
+
+    def _on_refresh_bind_targets(self) -> None:
+        if self._is_busy():
+            self._set_status(self._tr("status_wait_current_operation"), "warning")
+            return
+        self._refresh_bind_targets(log_change=True)
+
+    def _on_bind_target_changed(self) -> None:
+        self._bind_target_var.set(self._normalize_bind_target_key(self._bind_target_var.get()))
+        self._update_bind_hint()
+        self._schedule_save()
+
+    def _refresh_bind_targets(self, log_change: bool) -> None:
+        choices: list[tuple[str, str]] = [(self._BIND_TARGET_AUTO, self._tr("bind_option_auto"))]
+        try:
+            interfaces = self._controller.list_airplay_interfaces()
+        except Exception as exc:  # noqa: BLE001
+            self._append_log(f"[ADVERTENCIA] {self._tr('warn_bind_targets_refresh_failed', error=exc)}")
+            self._set_status(self._tr("warn_bind_targets_refresh_failed", error=exc), "warning")
+            self._bind_target_choices = choices
+            self._rebuild_bind_target_radios()
+            return
+
+        for adapter_name, mac in interfaces:
+            key = f"if:{adapter_name}"
+            label = self._tr("bind_option_adapter", name=adapter_name, mac=mac)
+            choices.append((key, label))
+
+        self._bind_target_choices = choices
+        self._rebuild_bind_target_radios()
+        if log_change:
+            self._append_log(self._tr("hint_bind_targets_refreshed"))
+            self._set_status(self._tr("status_bind_targets_refreshed"), "success")
+
+    def _rebuild_bind_target_radios(self) -> None:
+        for child in self._bind_targets_frame.winfo_children():
+            child.destroy()
+
+        valid_keys = {key for key, _label in self._bind_target_choices}
+        current_key = self._normalize_bind_target_key(self._bind_target_var.get())
+        if current_key not in valid_keys:
+            current_key = self._BIND_TARGET_AUTO if self._BIND_TARGET_AUTO in valid_keys else next(iter(valid_keys))
+        self._bind_target_var.set(current_key)
+
+        self._bind_target_buttons = []
+        for row, (key, label) in enumerate(self._bind_target_choices):
+            radio = ttk.Radiobutton(
+                self._bind_targets_frame,
+                text=label,
+                style="Card.TRadiobutton",
+                variable=self._bind_target_var,
+                value=key,
+                command=self._on_bind_target_changed,
+            )
+            radio.grid(row=row, column=0, sticky="w", pady=(0, 2))
+            self._bind_target_buttons.append(radio)
+
+        self._update_bind_hint()
+
+    def _update_bind_hint(self) -> None:
+        selected = self._normalize_bind_target_key(self._bind_target_var.get())
+        if selected == self._BIND_TARGET_AUTO:
+            self._bind_hint_var.set(self._tr("bind_hint_auto"))
+            return
+
+        label_map = {key: label for key, label in self._bind_target_choices}
+        selected_label = label_map.get(selected, selected[3:] if selected.startswith("if:") else selected)
+        self._bind_hint_var.set(self._tr("bind_hint_selected", interface=selected_label))
 
     def _bind_hotkeys(self) -> None:
         self._root.bind_all("<Alt-i>", lambda _e: self._shortcut(self._toggle_receiver))
@@ -619,6 +728,7 @@ class MainWindow:
             child.destroy()
 
         self._build_ui(announce_init=False)
+        self._refresh_bind_targets(log_change=False)
         self._apply_saved_geometry(current_geometry)
         self._restore_log_history()
         self._apply_device_mode_ui(log_change=False)
@@ -649,6 +759,7 @@ class MainWindow:
             self._capture_title_var,
             self._capture_fps_var,
             self._device_mode_var,
+            self._bind_target_var,
         )
         for v in vars_:
             v.trace_add("write", self._on_var_changed)
@@ -683,6 +794,7 @@ class MainWindow:
             "capture_window_title": self._capture_title_var.get(),
             "capture_fps": int(self._capture_fps_var.get()),
             "device_mode": self._selected_device_mode(),
+            "bind_target": self._normalize_bind_target_key(self._bind_target_var.get()),
             "language": self._language_code,
             "window_geometry": self._root.geometry(),
         }
@@ -766,6 +878,9 @@ class MainWindow:
         if mode == DEVICE_MODE_IPHONE:
             self._combo_profile.configure(state="readonly")
             self._entry_args.configure(state="normal")
+            self._btn_refresh_bind_targets.configure(state="normal")
+            for radio in self._bind_target_buttons:
+                radio.configure(state="normal")
             if log_change:
                 self._append_log(self._tr("log_mode_iphone"))
                 self._set_status(self._tr("status_mode_iphone"), "info")
@@ -776,6 +891,9 @@ class MainWindow:
 
         self._combo_profile.configure(state="disabled")
         self._entry_args.configure(state="disabled")
+        self._btn_refresh_bind_targets.configure(state="disabled")
+        for radio in self._bind_target_buttons:
+            radio.configure(state="disabled")
         self._btn_receiver.configure(text=self._tr("btn_open_android_projection"), underline=0, style="Primary.TButton")
         self._receiver_status_var.set(self._tr("receiver_status_android"))
         self._pill_receiver.configure(bg="#1f2f4b", fg="#9fc9ff", highlightbackground="#365c8f")
@@ -851,6 +969,7 @@ class MainWindow:
                 name,
                 extra_args=args,
                 append_hostname_suffix=bool(self._append_hostname_suffix_var.get()),
+                preferred_interface_alias=self._selected_bind_interface_alias(),
             )
 
         suffix_mode = self._tr("suffix_with_host") if self._append_hostname_suffix_var.get() else self._tr(
@@ -861,6 +980,23 @@ class MainWindow:
             fn=start_receiver,
             success_status=self._tr("success_start_receiver", name=name, suffix_mode=suffix_mode),
         )
+
+    def _auto_start_receiver_on_launch(self) -> None:
+        if self._closing or self._startup_receiver_requested:
+            return
+        self._startup_receiver_requested = True
+
+        if self._selected_device_mode() != DEVICE_MODE_IPHONE:
+            return
+        if self._controller.is_running():
+            return
+
+        uxplay_path = Path(self._uxplay_path_var.get().strip())
+        if not uxplay_path.exists():
+            return
+
+        self._append_log(self._tr("hint_autostart_receiver"))
+        self._toggle_receiver()
 
     def _open_android_projection(self) -> None:
         self._run_in_background(
@@ -1220,6 +1356,7 @@ class MainWindow:
         self._btn_record.configure(state=state)
         self._btn_browse.configure(state=state)
         self._btn_clear.configure(state=state)
+        self._btn_refresh_bind_targets.configure(state=state)
         self._btn_exit.configure(state="normal")
 
         if is_busy:
@@ -1232,6 +1369,8 @@ class MainWindow:
             self._entry_capture_title.configure(state="disabled")
             self._spin_capture_fps.configure(state="disabled")
             for radio in self._device_radio_buttons:
+                radio.configure(state="disabled")
+            for radio in self._bind_target_buttons:
                 radio.configure(state="disabled")
             return
 

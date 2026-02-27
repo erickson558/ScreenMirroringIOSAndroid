@@ -44,12 +44,14 @@ class AppController:
         receiver_name: str,
         extra_args: list[str] | None = None,
         append_hostname_suffix: bool = True,
+        preferred_interface_alias: str | None = None,
     ) -> None:
         self._service.start(
             uxplay_path=uxplay_path,
             receiver_name=receiver_name,
             extra_args=extra_args,
             append_hostname_suffix=append_hostname_suffix,
+            preferred_interface_alias=preferred_interface_alias,
         )
 
     def stop_receiver(self) -> None:
@@ -57,6 +59,9 @@ class AppController:
 
     def is_running(self) -> bool:
         return self._service.is_running
+
+    def list_airplay_interfaces(self) -> list[tuple[str, str]]:
+        return self._service.list_available_interfaces()
 
     def open_android_projection_portal(self) -> None:
         self._projection_service.open_android_projection_portal()
