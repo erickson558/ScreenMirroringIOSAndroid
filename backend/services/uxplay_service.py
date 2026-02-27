@@ -270,16 +270,27 @@ class UxPlayService:
             return [(receiver_name, runtime_args, None)]
 
         adapter_name, mac = adapters[0]
-        if len(adapters) == 1:
-            hint = f"[PISTA] MAC AirPlay fijada automaticamente a {mac} ({adapter_name})."
-            return [(receiver_name, ["-m", mac, *runtime_args], hint)]
+        primary_hint = f"[PISTA] MAC AirPlay fijada automaticamente a {mac} ({adapter_name})."
+        primary_plan = (receiver_name, ["-m", mac, *runtime_args], primary_hint)
 
         adapter_list = ", ".join(name for name, _mac in adapters)
-        hint = (
+        multi_hint = (
             f"[PISTA] MAC AirPlay fijada automaticamente a {mac} ({adapter_name}). "
             f"Interfaces activas detectadas: {adapter_list}."
         )
-        return [(receiver_name, ["-m", mac, *runtime_args], hint)]
+        if len(adapters) > 1:
+            primary_plan = (receiver_name, ["-m", mac, *runtime_args], multi_hint)
+
+        plans = [primary_plan]
+        if self._is_windows_vpn_active():
+            fallback_name = self._build_instance_name(receiver_name, "Fallback", 1)
+            fallback_args = self._with_base_port(runtime_args, 17000)
+            fallback_hint = (
+                "[PISTA] VPN activa detectada: se inicia instancia AirPlay de respaldo "
+                f"'{fallback_name}' en puertos alternos para mejorar descubrimiento."
+            )
+            plans.append((fallback_name, fallback_args, fallback_hint))
+        return plans
 
     def _has_explicit_mac_arg(self, runtime_args: list[str]) -> bool:
         for token in runtime_args:
@@ -291,6 +302,28 @@ class UxPlayService:
             if low == "--mac":
                 return True
         return False
+
+    def _with_base_port(self, runtime_args: list[str], base_port: int) -> list[str]:
+        cleaned: list[str] = []
+        index = 0
+        removed_port = False
+        while index < len(runtime_args):
+            token = runtime_args[index]
+            low = token.lower()
+            if not removed_port and low == "-p":
+                removed_port = True
+                index += 1
+                if index < len(runtime_args) and not runtime_args[index].startswith("-"):
+                    index += 1
+                continue
+            if not removed_port and low.startswith("-p") and len(low) > 2 and low[2].isdigit():
+                removed_port = True
+                index += 1
+                continue
+            cleaned.append(token)
+            index += 1
+
+        return ["-p", str(base_port), *cleaned]
 
     def _has_explicit_port_arg(self, runtime_args: list[str]) -> bool:
         for token in runtime_args:
@@ -677,6 +710,17 @@ class UxPlayService:
             )
 
         return hints
+
+    def _is_windows_vpn_active(self) -> bool:
+        if os.name != "nt":
+            return False
+        profiles = self._query_connection_profiles()
+        for alias, _category, ipv4, ipv6 in profiles:
+            if ipv4 == "Disconnected" and ipv6 == "Disconnected":
+                continue
+            if "vpn" in alias.lower():
+                return True
+        return False
 
     def _query_connection_profiles(self) -> list[tuple[str, str, str, str]]:
         powershell_script = (
