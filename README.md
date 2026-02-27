@@ -55,3 +55,29 @@ Resultado:
 - Ãcono cargado desde `ScreenMirrorIOSAndroid.ico`
 - Runtime `tools/uxplay` embebido en el ejecutable `onefile`
 - Incremento automÃ¡tico de versiÃ³n (`version.json`, +`0.0.1` por compilaciÃ³n)
+
+## Troubleshooting Git SSL (Windows)
+
+Si aparece el error:
+
+`No se pudo cargar la URL: SSL certificate problem: unable to get local issuer certificate`
+
+ejecuta:
+
+```powershell
+.\scripts\fix_git_ssl_windows.ps1
+```
+
+El script aplica configuracion recomendada para Git en Windows:
+
+- Usa `schannel` (almacen de certificados de Windows).
+- Limpia overrides de CA (`http.sslCAInfo`, `http.sslCAPath`).
+- Mantiene `http.sslVerify=true`.
+
+Solo como ultimo recurso temporal:
+
+```powershell
+.\scripts\fix_git_ssl_windows.ps1 -InsecureFallback
+```
+
+Eso desactiva validacion SSL (`http.sslVerify=false`) y no se recomienda para uso permanente.
