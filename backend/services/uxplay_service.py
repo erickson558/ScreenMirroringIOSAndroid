@@ -80,6 +80,8 @@ class UxPlayService:
             if not normalized_path.is_file():
                 raise FileNotFoundError(f"La ruta de UxPlay no es un archivo valido: {normalized_path}")
 
+            stale_count = self._terminate_stale_uxplay_instances(normalized_path)
+
             receiver_name = self._sanitize_receiver_name(receiver_name)
             runtime_args = [arg.strip() for arg in (extra_args or []) if arg and arg.strip()]
             runtime_args = [arg for arg in runtime_args if arg.lower() != "-nh"]
@@ -148,6 +150,11 @@ class UxPlayService:
             self._emit_log(f"Iniciando receptor en {len(command_logs)} interfaces activas.")
             for command_line in command_logs:
                 self._emit_log(f"[PISTA] {command_line}")
+        if stale_count > 0:
+            self._emit_log(
+                "[PISTA] Se cerraron procesos UxPlay previos en segundo plano "
+                f"({stale_count}) para evitar anuncios duplicados en iPhone."
+            )
         for hint in startup_hints:
             self._emit_log(hint)
         if port_hint:
@@ -290,22 +297,14 @@ class UxPlayService:
         vpn_active = self._is_windows_vpn_active()
 
         if vpn_active:
-            primary_args = list(runtime_args)
-            if preferred_adapter is not None:
-                primary_args = ["-m", mac, *primary_args]
+            primary_args = ["-m", mac, *runtime_args]
             if not self._has_explicit_sync_arg(primary_args):
                 primary_args = ["-vsync", "no", *primary_args]
 
-            if preferred_adapter is not None:
-                primary_hint = (
-                    f"[PISTA] VPN activa detectada: se fija interfaz seleccionada '{adapter_name}' "
-                    f"({mac}) para AirPlay."
-                )
-            else:
-                primary_hint = (
-                    "[PISTA] VPN activa detectada: se prioriza una unica instancia principal con anuncio global "
-                    "para mejorar apertura estable de la ventana de video."
-                )
+            primary_hint = (
+                f"[PISTA] VPN activa detectada: se fija interfaz principal '{adapter_name}' "
+                f"({mac}) para anuncio AirPlay unico y estable."
+            )
             return [(receiver_name, primary_args, primary_hint)]
 
         if preferred_adapter is not None:
@@ -323,6 +322,50 @@ class UxPlayService:
             primary_plan = (receiver_name, ["-m", mac, *runtime_args], multi_hint)
 
         return [primary_plan]
+
+    def _terminate_stale_uxplay_instances(self, uxplay_path: Path) -> int:
+        if os.name != "nt":
+            return 0
+
+        escaped_path = str(uxplay_path).replace("'", "''")
+        powershell_script = (
+            "$ErrorActionPreference='SilentlyContinue';"
+            f"$target='{escaped_path}'.ToLowerInvariant();"
+            "$killed=0;"
+            "Get-CimInstance Win32_Process -Filter \"Name='uxplay.exe'\" | ForEach-Object {"
+            "  $procPath = ($_.ExecutablePath + '').ToLowerInvariant();"
+            "  if ($procPath -eq $target) {"
+            "    try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; $killed++ } catch {}"
+            "  }"
+            "};"
+            "Write-Output $killed;"
+        )
+
+        try:
+            completed = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", powershell_script],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=6,
+                stdin=subprocess.DEVNULL,
+                creationflags=self._creationflags(),
+                startupinfo=self._startupinfo(),
+            )
+        except (OSError, subprocess.SubprocessError):
+            return 0
+
+        if completed.returncode not in (0, 1):
+            return 0
+
+        raw = (completed.stdout or "").strip().splitlines()
+        if not raw:
+            return 0
+
+        try:
+            return max(0, int(raw[-1].strip()))
+        except ValueError:
+            return 0
 
     def _has_explicit_mac_arg(self, runtime_args: list[str]) -> bool:
         for token in runtime_args:
