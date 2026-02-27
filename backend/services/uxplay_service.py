@@ -22,6 +22,8 @@ class _StartRequest:
 
 
 class UxPlayService:
+    _DEFAULT_WINDOW_SIZE = "1280x720@60"
+
     def __init__(
         self,
         on_log: LogCallback | None = None,
@@ -78,6 +80,7 @@ class UxPlayService:
                 runtime_args = ["-nh", *runtime_args]
             runtime_args, port_hint = self._ensure_legacy_ports(runtime_args)
             runtime_args, persist_hint = self._ensure_window_persistence(runtime_args)
+            runtime_args, size_hint = self._ensure_window_size(runtime_args)
             launch_plans = self._build_launch_plans(receiver_name, runtime_args)
             self._last_start_request = _StartRequest(
                 uxplay_path=normalized_path,
@@ -140,6 +143,8 @@ class UxPlayService:
             self._emit_log(port_hint)
         if persist_hint:
             self._emit_log(persist_hint)
+        if size_hint:
+            self._emit_log(size_hint)
         self._emit_log(
             "[PISTA] Espera a ver 'Initialized server socket(s)' antes de conectar en iPhone para evitar doble intento."
         )
@@ -329,6 +334,26 @@ class UxPlayService:
         return (
             [*runtime_args, "-nc"],
             "[PISTA] Se activo '-nc' para mantener la ventana abierta entre reconexiones AirPlay.",
+        )
+
+    def _has_explicit_window_size_arg(self, runtime_args: list[str]) -> bool:
+        for token in runtime_args:
+            low = token.lower()
+            if low == "-s":
+                return True
+            if low.startswith("-s") and len(low) > 2:
+                return True
+        return False
+
+    def _ensure_window_size(self, runtime_args: list[str]) -> tuple[list[str], str | None]:
+        if self._has_explicit_window_size_arg(runtime_args):
+            return runtime_args, None
+        return (
+            [*runtime_args, "-s", self._DEFAULT_WINDOW_SIZE],
+            (
+                "[PISTA] Se aplico tamano de ventana UxPlay "
+                f"{self._DEFAULT_WINDOW_SIZE} para mejorar visibilidad y grabacion."
+            ),
         )
 
     def _build_instance_name(self, receiver_name: str, adapter_name: str, index: int) -> str:

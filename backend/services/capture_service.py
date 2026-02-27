@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import threading
+import time
 from typing import Callable
 
 LogCallback = Callable[[str], None]
@@ -114,6 +115,7 @@ class CaptureService:
             early_code: int | None = None
             selected_source = candidate_sources[0]
             selected_region: tuple[int, int, int, int] | None = None
+            started = False
 
             for source_arg in candidate_sources:
                 source_for_ffmpeg = source_arg
@@ -126,31 +128,40 @@ class CaptureService:
                     elif not self._window_title_exists(candidate_title):
                         continue
 
-                command = self._build_record_command(
-                    ffmpeg_path,
-                    source_for_ffmpeg,
-                    output_path,
-                    fps,
-                    capture_region=capture_region,
-                )
-                process = self._spawn_record_process(
-                    command=command,
-                    ffmpeg_path=ffmpeg_path,
-                    env=env,
-                    creationflags=creationflags,
-                    startupinfo=startupinfo,
-                )
-                exited_early, early_output, early_code = self._check_early_startup_failure(process)
-                if not exited_early:
-                    selected_source = source_arg
-                    selected_region = capture_region
-                    break
-                if mode == "window" and self._is_window_not_found_error(early_output):
-                    continue
+                max_attempts = 2 if mode == "window" else 1
+                for attempt in range(1, max_attempts + 1):
+                    command = self._build_record_command(
+                        ffmpeg_path,
+                        source_for_ffmpeg,
+                        output_path,
+                        fps,
+                        capture_region=capture_region,
+                    )
+                    process = self._spawn_record_process(
+                        command=command,
+                        ffmpeg_path=ffmpeg_path,
+                        env=env,
+                        creationflags=creationflags,
+                        startupinfo=startupinfo,
+                    )
+                    exited_early, early_output, early_code = self._check_early_startup_failure(process)
+                    if not exited_early:
+                        selected_source = source_arg
+                        selected_region = capture_region
+                        started = True
+                        break
+                    if mode == "window" and self._is_window_not_found_error(early_output):
+                        break
+                    if self._is_retryable_startup_error(early_output) and attempt < max_attempts:
+                        self._emit_log("[PISTA] Inicio de grabacion inestable. Reintentando automaticamente...")
+                        time.sleep(0.35)
+                        continue
 
-                details = self._summarize_early_failure(early_output, early_code)
-                raise RuntimeError(f"La grabacion no pudo iniciar: {details}")
-            else:
+                    details = self._summarize_early_failure(early_output, early_code)
+                    raise RuntimeError(f"La grabacion no pudo iniciar: {details}")
+                if started:
+                    break
+            if not started:
                 details = self._summarize_early_failure(early_output, early_code)
                 raise RuntimeError(f"La grabacion no pudo iniciar: {details}")
 
@@ -604,6 +615,17 @@ class CaptureService:
     def _is_window_not_found_error(self, text: str) -> bool:
         low = text.lower()
         return "can't find window" in low or "error opening input file title=" in low
+
+    def _is_retryable_startup_error(self, text: str) -> bool:
+        low = text.lower()
+        markers = (
+            "failed to capture image",
+            "error during demuxing",
+            "error retrieving a packet from demuxer",
+            "resource temporarily unavailable",
+            "i/o error",
+        )
+        return any(marker in low for marker in markers)
 
     def _summarize_early_failure(self, output: str, exit_code: int | None) -> str:
         cleaned = " ".join((output or "").strip().split())
