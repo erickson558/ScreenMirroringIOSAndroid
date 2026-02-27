@@ -278,19 +278,10 @@ class UxPlayService:
                 primary_args = ["-vsync", "no", *primary_args]
 
             primary_hint = (
-                "[PISTA] VPN activa detectada: la instancia principal usara anuncio global "
-                "para maximizar descubrimiento desde iPhone."
+                "[PISTA] VPN activa detectada: se prioriza una unica instancia principal con anuncio global "
+                "para mejorar apertura estable de la ventana de video."
             )
-            lan_name = self._build_instance_name(receiver_name, "LAN", 1)
-            lan_args = self._with_base_port(["-m", mac, *runtime_args], 17000)
-            lan_hint = (
-                "[PISTA] Se inicia instancia secundaria de respaldo "
-                f"'{lan_name}' con MAC LAN fija {mac} en puertos alternos."
-            )
-            return [
-                (receiver_name, primary_args, primary_hint),
-                (lan_name, lan_args, lan_hint),
-            ]
+            return [(receiver_name, primary_args, primary_hint)]
 
         primary_hint = f"[PISTA] MAC AirPlay fijada automaticamente a {mac} ({adapter_name})."
         primary_plan = (receiver_name, ["-m", mac, *runtime_args], primary_hint)
@@ -315,28 +306,6 @@ class UxPlayService:
             if low == "--mac":
                 return True
         return False
-
-    def _with_base_port(self, runtime_args: list[str], base_port: int) -> list[str]:
-        cleaned: list[str] = []
-        index = 0
-        removed_port = False
-        while index < len(runtime_args):
-            token = runtime_args[index]
-            low = token.lower()
-            if not removed_port and low == "-p":
-                removed_port = True
-                index += 1
-                if index < len(runtime_args) and not runtime_args[index].startswith("-"):
-                    index += 1
-                continue
-            if not removed_port and low.startswith("-p") and len(low) > 2 and low[2].isdigit():
-                removed_port = True
-                index += 1
-                continue
-            cleaned.append(token)
-            index += 1
-
-        return ["-p", str(base_port), *cleaned]
 
     def _has_explicit_sync_arg(self, runtime_args: list[str]) -> bool:
         for token in runtime_args:
@@ -392,23 +361,6 @@ class UxPlayService:
                 f"{self._DEFAULT_WINDOW_SIZE} para mejorar visibilidad y grabacion."
             ),
         )
-
-    def _build_instance_name(self, receiver_name: str, adapter_name: str, index: int) -> str:
-        clean_adapter = " ".join(adapter_name.strip().split())
-        if not clean_adapter:
-            clean_adapter = f"NIC {index + 1}"
-
-        suffix = f" [{clean_adapter}]"
-        max_base_len = 63 - len(suffix)
-        if max_base_len < 8:
-            suffix = f" [{index + 1}]"
-            max_base_len = 63 - len(suffix)
-
-        base_name = receiver_name[:max_base_len].rstrip()
-        if not base_name:
-            base_name = "ScreenMirrorIOSAndroid"
-
-        return self._sanitize_receiver_name(f"{base_name}{suffix}")
 
     def _resolve_windows_active_adapters(self) -> list[tuple[str, str]]:
         powershell_script = (
