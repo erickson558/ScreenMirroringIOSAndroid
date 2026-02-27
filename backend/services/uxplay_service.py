@@ -270,6 +270,28 @@ class UxPlayService:
             return [(receiver_name, runtime_args, None)]
 
         adapter_name, mac = adapters[0]
+        vpn_active = self._is_windows_vpn_active()
+
+        if vpn_active:
+            primary_args = list(runtime_args)
+            if not self._has_explicit_sync_arg(primary_args):
+                primary_args = ["-vsync", "no", *primary_args]
+
+            primary_hint = (
+                "[PISTA] VPN activa detectada: la instancia principal usara anuncio global "
+                "para maximizar descubrimiento desde iPhone."
+            )
+            lan_name = self._build_instance_name(receiver_name, "LAN", 1)
+            lan_args = self._with_base_port(["-m", mac, *runtime_args], 17000)
+            lan_hint = (
+                "[PISTA] Se inicia instancia secundaria de respaldo "
+                f"'{lan_name}' con MAC LAN fija {mac} en puertos alternos."
+            )
+            return [
+                (receiver_name, primary_args, primary_hint),
+                (lan_name, lan_args, lan_hint),
+            ]
+
         primary_hint = f"[PISTA] MAC AirPlay fijada automaticamente a {mac} ({adapter_name})."
         primary_plan = (receiver_name, ["-m", mac, *runtime_args], primary_hint)
 
@@ -281,16 +303,7 @@ class UxPlayService:
         if len(adapters) > 1:
             primary_plan = (receiver_name, ["-m", mac, *runtime_args], multi_hint)
 
-        plans = [primary_plan]
-        if self._is_windows_vpn_active():
-            fallback_name = self._build_instance_name(receiver_name, "Fallback", 1)
-            fallback_args = self._with_base_port(runtime_args, 17000)
-            fallback_hint = (
-                "[PISTA] VPN activa detectada: se inicia instancia AirPlay de respaldo "
-                f"'{fallback_name}' en puertos alternos para mejorar descubrimiento."
-            )
-            plans.append((fallback_name, fallback_args, fallback_hint))
-        return plans
+        return [primary_plan]
 
     def _has_explicit_mac_arg(self, runtime_args: list[str]) -> bool:
         for token in runtime_args:
@@ -324,6 +337,15 @@ class UxPlayService:
             index += 1
 
         return ["-p", str(base_port), *cleaned]
+
+    def _has_explicit_sync_arg(self, runtime_args: list[str]) -> bool:
+        for token in runtime_args:
+            low = token.lower()
+            if low == "-vsync" or low.startswith("-vsync"):
+                return True
+            if low == "-async" or low.startswith("-async"):
+                return True
+        return False
 
     def _has_explicit_port_arg(self, runtime_args: list[str]) -> bool:
         for token in runtime_args:
