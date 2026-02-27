@@ -270,34 +270,16 @@ class UxPlayService:
             return [(receiver_name, runtime_args, None)]
 
         if len(adapters) == 1:
-            adapter_name, mac = adapters[0]
-            hint = f"[PISTA] MAC AirPlay fijada automaticamente a {mac} ({adapter_name})."
-            return [(receiver_name, ["-m", mac, *runtime_args], hint)]
+            adapter_name, _mac = adapters[0]
+            hint = f"[PISTA] Adaptador de red activo detectado: {adapter_name}."
+            return [(receiver_name, runtime_args, hint)]
 
-        if self._has_explicit_port_arg(runtime_args):
-            adapter_name, mac = adapters[0]
-            hint = (
-                "[PISTA] Varias interfaces detectadas, pero se usa solo la principal "
-                f"({adapter_name}) porque ya configuraste puertos manuales (-p)."
-            )
-            return [(receiver_name, ["-m", mac, *runtime_args], hint)]
-
-        plans: list[tuple[str, list[str], str | None]] = []
-        for index, (adapter_name, mac) in enumerate(adapters):
-            instance_name = receiver_name if index == 0 else self._build_instance_name(receiver_name, adapter_name, index)
-            instance_args = ["-m", mac, *runtime_args]
-            port_hint = ""
-            if index > 0:
-                base_port = 17000 + index * 10
-                instance_args = ["-p", str(base_port), *instance_args]
-                port_hint = f" | Puertos base: {base_port}"
-
-            hint = (
-                f"[PISTA] Instancia AirPlay {index + 1}: {instance_name} | "
-                f"NIC: {adapter_name} | MAC: {mac}{port_hint}"
-            )
-            plans.append((instance_name, instance_args, hint))
-        return plans
+        adapter_list = ", ".join(name for name, _mac in adapters)
+        hint = (
+            "[PISTA] Varias interfaces activas detectadas "
+            f"({adapter_list}). UxPlay anunciara el receptor en interfaces disponibles."
+        )
+        return [(receiver_name, runtime_args, hint)]
 
     def _has_explicit_mac_arg(self, runtime_args: list[str]) -> bool:
         for token in runtime_args:
