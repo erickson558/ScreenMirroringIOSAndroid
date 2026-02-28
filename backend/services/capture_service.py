@@ -551,7 +551,7 @@ class CaptureService:
                 ]
             )
 
-        return [
+        cmd = [
             str(ffmpeg_path),
             "-hide_banner",
             "-loglevel",
@@ -587,6 +587,8 @@ class CaptureService:
             "90000",
             str(output_path),
         ]
+        self._emit_log(f"[DEBUG] Comando ffmpeg: {' '.join(cmd)}")
+        return cmd
 
     def _track_window_motion(self, session_id: int) -> None:
         while True:

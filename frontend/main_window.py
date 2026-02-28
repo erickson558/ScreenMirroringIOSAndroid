@@ -1174,21 +1174,21 @@ class MainWindow:
         temp_path = Path(tempfile.gettempdir()) / f"ScreenMirrorIOSAndroid_{started_at.strftime('%Y%m%d_%H%M%S_%f')}.mp4"
 
         capture_window_source = self._capture_title_var.get().strip()
+        capture_region: tuple[int, int, int, int] | None = None
+        
         if os.name == "nt" and self._embedded_window_hwnd is not None:
-            capture_window_source = f"hwnd=0x{self._embedded_window_hwnd:X}"
-            self._append_log("[PISTA] Grabacion enfocada al panel integrado de previsualizacion.")
-
-        def start_recording() -> None:
-            self._controller.start_recording(
-                uxplay_path=Path(self._uxplay_path_var.get().strip()),
-                output_path=temp_path,
-                source_mode="window",
-                window_title=capture_window_source,
-                fps=int(self._capture_fps_var.get()),
+            # Use explicit screen region instead of hwnd for more reliable capture
+            capture_region = (
+                self._preview_host_frame.winfo_rootx(),
+                self._preview_host_frame.winfo_rooty(),
+                self._preview_host_frame.winfo_width(),
+                self._preview_host_frame.winfo_height(),
             )
+            self._append_log("[PISTA] Grabacion usando region explicita del panel integrado.")
+        else:
+            capture_window_source = f"hwnd=0x{self._embedded_window_hwnd:X}" if self._embedded_window_hwnd else capture_window_source
 
         def start_recording() -> None:
-            # if we computed an explicit region, ask the controller to use it
             self._controller.start_recording(
                 uxplay_path=Path(self._uxplay_path_var.get().strip()),
                 output_path=temp_path,
