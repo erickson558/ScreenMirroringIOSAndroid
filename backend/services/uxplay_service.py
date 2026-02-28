@@ -101,7 +101,8 @@ class UxPlayService:
             runtime_args, port_hint = self._ensure_legacy_ports(runtime_args)
             runtime_args, persist_hint = self._ensure_window_persistence(runtime_args)
             runtime_args, size_hint = self._ensure_window_size(runtime_args)
-            runtime_args, renderer_hint = self._ensure_windows_d3d11_renderer(runtime_args)
+            # Don't force D3D11 - it breaks AirPlay handshake on some systems
+            renderer_hint = None
             launch_plans = self._build_launch_plans(receiver_name, runtime_args, preferred_alias)
             self._last_start_request = _StartRequest(
                 uxplay_path=normalized_path,
