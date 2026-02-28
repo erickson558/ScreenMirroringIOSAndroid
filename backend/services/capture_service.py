@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from typing import Callable
@@ -18,6 +19,11 @@ class CaptureService:
     _WINDOW_REGION_PADDING_PX = 10
     _WINDOW_REGION_STABILIZATION_SAMPLES = 4
     _WINDOW_REGION_STABILIZATION_DELAY_SECONDS = 0.1
+    _WINDOW_TRACK_POLL_SECONDS = 0.35
+    _WINDOW_TRACK_MOVE_THRESHOLD_PX = 18
+    _WINDOW_TRACK_SIZE_TOLERANCE_PX = 24
+    _WINDOW_TRACK_ROTATE_COOLDOWN_SECONDS = 1.2
+    _WINDOW_TRACK_MAX_SEGMENTS = 120
 
     def __init__(
         self,
@@ -29,9 +35,19 @@ class CaptureService:
         self._record_process: subprocess.Popen[str] | None = None
         self._record_output_path: Path | None = None
         self._record_ffmpeg_path: Path | None = None
+        self._record_base_output_path: Path | None = None
         self._record_requested_output_path: Path | None = None
         self._last_completed_output_path: Path | None = None
         self._record_reader_thread: threading.Thread | None = None
+        self._record_tracking_thread: threading.Thread | None = None
+        self._record_tracking_source: str | None = None
+        self._record_tracking_region: tuple[int, int, int, int] | None = None
+        self._record_tracking_size: tuple[int, int] | None = None
+        self._record_tracking_fps: int = 30
+        self._record_segment_paths: list[Path] = []
+        self._record_session_id = 0
+        self._record_rotation_in_progress = False
+        self._record_last_rotation_at = 0.0
         self._lock = threading.Lock()
 
     @property
@@ -120,6 +136,7 @@ class CaptureService:
             selected_source = candidate_sources[0]
             selected_region: tuple[int, int, int, int] | None = None
             started = False
+            tracking_session_id: int | None = None
 
             for source_arg in candidate_sources:
                 source_for_ffmpeg = source_arg
@@ -185,8 +202,28 @@ class CaptureService:
             self._record_process = process
             self._record_output_path = output_path
             self._record_ffmpeg_path = ffmpeg_path
+            self._record_base_output_path = output_path
             self._record_requested_output_path = None
             self._last_completed_output_path = None
+            self._record_segment_paths = [output_path]
+            self._record_rotation_in_progress = False
+            self._record_last_rotation_at = time.monotonic()
+            self._record_tracking_source = None
+            self._record_tracking_region = None
+            self._record_tracking_size = None
+            self._record_tracking_fps = max(15, min(fps, 60))
+            self._record_session_id += 1
+
+            if mode == "window" and selected_region is not None:
+                if selected_source.startswith("title="):
+                    tracking_source = selected_source
+                else:
+                    title = " ".join(window_title.split()).strip() or "Direct3D11 renderer"
+                    tracking_source = f"title={title}"
+                self._record_tracking_source = tracking_source
+                self._record_tracking_region = selected_region
+                self._record_tracking_size = (selected_region[2], selected_region[3])
+                tracking_session_id = self._record_session_id
 
         self._emit_log(f"Grabacion iniciada: {output_path}")
         self._emit_recording_state(True)
@@ -198,10 +235,21 @@ class CaptureService:
         )
         self._record_reader_thread.start()
 
+        if tracking_session_id is not None:
+            self._emit_log("[PISTA] Seguimiento de ventana activo: la grabacion intentara seguir la ventana D3D al moverla.")
+            self._record_tracking_thread = threading.Thread(
+                target=self._track_window_motion,
+                args=(tracking_session_id,),
+                daemon=True,
+            )
+            self._record_tracking_thread.start()
+
     def stop_recording(self, output_path: Path | None = None) -> None:
         process: subprocess.Popen[str] | None
         recorded_output_path: Path | None
         ffmpeg_path: Path | None
+        base_output_path: Path | None
+        segment_paths: list[Path]
         requested_output_path: Path | None = None
         last_completed_output: Path | None
 
@@ -212,6 +260,8 @@ class CaptureService:
             process = self._record_process
             recorded_output_path = self._record_output_path
             ffmpeg_path = self._record_ffmpeg_path
+            base_output_path = self._record_base_output_path
+            segment_paths = list(self._record_segment_paths)
             last_completed_output = self._last_completed_output_path
 
         if process is None or process.poll() is not None:
@@ -255,11 +305,30 @@ class CaptureService:
                 self._record_process = None
                 self._record_output_path = None
                 self._record_ffmpeg_path = None
+                self._record_base_output_path = None
                 self._record_requested_output_path = None
+                self._record_session_id += 1
+                self._record_tracking_source = None
+                self._record_tracking_region = None
+                self._record_tracking_size = None
+                self._record_rotation_in_progress = False
+                self._record_segment_paths = []
                 should_emit_state = True
 
         if should_emit_state:
             saved_output = recorded_output_path
+            if (
+                ffmpeg_path is not None
+                and base_output_path is not None
+                and len(segment_paths) > 1
+            ):
+                merged_output = self._concat_recording_segments(
+                    ffmpeg_path=ffmpeg_path,
+                    segment_paths=segment_paths,
+                    base_output_path=base_output_path,
+                )
+                if merged_output is not None:
+                    saved_output = merged_output
             if saved_output is not None and pending_output_path is not None:
                 saved_output = self._finalize_recording_output(saved_output, pending_output_path)
             if forced_stop and saved_output is not None and ffmpeg_path is not None:
@@ -280,16 +349,29 @@ class CaptureService:
         exit_code = process.wait()
         should_emit_state = False
         output_path: Path | None = None
+        ffmpeg_path: Path | None = None
+        base_output_path: Path | None = None
+        segment_paths: list[Path] = []
         pending_output_path: Path | None = None
 
         with self._lock:
             if self._record_process is process:
                 self._record_process = None
                 output_path = self._record_output_path
+                ffmpeg_path = self._record_ffmpeg_path
+                base_output_path = self._record_base_output_path
+                segment_paths = list(self._record_segment_paths)
                 pending_output_path = self._record_requested_output_path
                 self._record_output_path = None
                 self._record_ffmpeg_path = None
+                self._record_base_output_path = None
                 self._record_requested_output_path = None
+                self._record_session_id += 1
+                self._record_tracking_source = None
+                self._record_tracking_region = None
+                self._record_tracking_size = None
+                self._record_rotation_in_progress = False
+                self._record_segment_paths = []
                 should_emit_state = True
 
         if not should_emit_state:
@@ -297,6 +379,18 @@ class CaptureService:
             return
 
         saved_output = output_path
+        if (
+            ffmpeg_path is not None
+            and base_output_path is not None
+            and len(segment_paths) > 1
+        ):
+            merged_output = self._concat_recording_segments(
+                ffmpeg_path=ffmpeg_path,
+                segment_paths=segment_paths,
+                base_output_path=base_output_path,
+            )
+            if merged_output is not None:
+                saved_output = merged_output
         if saved_output is not None and pending_output_path is not None:
             saved_output = self._finalize_recording_output(saved_output, pending_output_path)
 
@@ -436,6 +530,357 @@ class CaptureService:
             "90000",
             str(output_path),
         ]
+
+    def _track_window_motion(self, session_id: int) -> None:
+        while True:
+            time.sleep(self._WINDOW_TRACK_POLL_SECONDS)
+
+            with self._lock:
+                if session_id != self._record_session_id:
+                    return
+                process = self._record_process
+                source = self._record_tracking_source
+                current_region = self._record_tracking_region
+                target_size = self._record_tracking_size
+                in_rotation = self._record_rotation_in_progress
+                last_rotation_at = self._record_last_rotation_at
+
+            if process is None or process.poll() is not None:
+                return
+            if source is None or current_region is None or target_size is None:
+                return
+            if in_rotation:
+                continue
+            if time.monotonic() - last_rotation_at < self._WINDOW_TRACK_ROTATE_COOLDOWN_SECONDS:
+                continue
+
+            detected_region = self._resolve_window_region(source)
+            if detected_region is None:
+                continue
+
+            normalized_region = self._normalize_tracking_region(detected_region, target_size)
+            if normalized_region is None:
+                continue
+
+            if not self._has_tracking_region_moved(current_region, normalized_region):
+                continue
+
+            self._rotate_recording_segment(session_id=session_id, target_region=normalized_region)
+
+    def _normalize_tracking_region(
+        self,
+        detected_region: tuple[int, int, int, int],
+        target_size: tuple[int, int],
+    ) -> tuple[int, int, int, int] | None:
+        x, y, width, height = detected_region
+        target_width, target_height = target_size
+
+        if (
+            abs(width - target_width) > self._WINDOW_TRACK_SIZE_TOLERANCE_PX
+            or abs(height - target_height) > self._WINDOW_TRACK_SIZE_TOLERANCE_PX
+        ):
+            return None
+
+        virtual_left, virtual_top, virtual_right, virtual_bottom = self._virtual_screen_bounds()
+        if target_width > (virtual_right - virtual_left) or target_height > (virtual_bottom - virtual_top):
+            return None
+
+        center_x = x + (width // 2)
+        center_y = y + (height // 2)
+        left = center_x - (target_width // 2)
+        top = center_y - (target_height // 2)
+
+        max_left = virtual_right - target_width
+        max_top = virtual_bottom - target_height
+        left = min(max(left, virtual_left), max_left)
+        top = min(max(top, virtual_top), max_top)
+
+        left, top, right, bottom = self._ensure_even_rect_dimensions(
+            left,
+            top,
+            left + target_width,
+            top + target_height,
+        )
+        width = right - left
+        height = bottom - top
+        if width < 32 or height < 32:
+            return None
+        return (left, top, width, height)
+
+    def _has_tracking_region_moved(
+        self,
+        current_region: tuple[int, int, int, int],
+        new_region: tuple[int, int, int, int],
+    ) -> bool:
+        cur_x, cur_y, cur_w, cur_h = current_region
+        new_x, new_y, new_w, new_h = new_region
+        if abs(new_w - cur_w) > 2 or abs(new_h - cur_h) > 2:
+            return True
+        return (
+            abs(new_x - cur_x) >= self._WINDOW_TRACK_MOVE_THRESHOLD_PX
+            or abs(new_y - cur_y) >= self._WINDOW_TRACK_MOVE_THRESHOLD_PX
+        )
+
+    def _rotate_recording_segment(
+        self,
+        session_id: int,
+        target_region: tuple[int, int, int, int],
+    ) -> None:
+        with self._lock:
+            if session_id != self._record_session_id:
+                return
+            if self._record_rotation_in_progress:
+                return
+
+            process = self._record_process
+            ffmpeg_path = self._record_ffmpeg_path
+            base_output_path = self._record_base_output_path
+            target_fps = self._record_tracking_fps
+            segment_count = len(self._record_segment_paths)
+            if (
+                process is None
+                or process.poll() is not None
+                or ffmpeg_path is None
+                or base_output_path is None
+            ):
+                return
+            if segment_count >= self._WINDOW_TRACK_MAX_SEGMENTS:
+                self._emit_log(
+                    "[ADVERTENCIA] Se alcanzo el maximo de segmentos de seguimiento. "
+                    "Se mantendra la captura actual."
+                )
+                return
+
+            next_output_path = self._build_segment_output_path(base_output_path, segment_count + 1)
+            self._record_rotation_in_progress = True
+
+        env = self._build_capture_env(ffmpeg_path)
+        creationflags = self._creationflags()
+        startupinfo = self._startupinfo()
+        command = self._build_record_command(
+            ffmpeg_path=ffmpeg_path,
+            source_arg="desktop",
+            output_path=next_output_path,
+            fps=target_fps,
+            capture_region=target_region,
+        )
+
+        try:
+            new_process = self._spawn_record_process(
+                command=command,
+                ffmpeg_path=ffmpeg_path,
+                env=env,
+                creationflags=creationflags,
+                startupinfo=startupinfo,
+            )
+        except Exception as exc:  # noqa: BLE001
+            with self._lock:
+                if session_id == self._record_session_id:
+                    self._record_rotation_in_progress = False
+            self._emit_log(f"[ADVERTENCIA] No se pudo ajustar la captura al mover la ventana: {exc}")
+            return
+
+        exited_early, early_output, early_code = self._check_early_startup_failure(new_process, timeout=1.2)
+        if exited_early:
+            self._terminate_record_process_quietly(new_process, timeout=4)
+            with self._lock:
+                if session_id == self._record_session_id:
+                    self._record_rotation_in_progress = False
+            details = self._summarize_early_failure(early_output, early_code)
+            self._emit_log(
+                "[ADVERTENCIA] No se pudo reanclar la grabacion a la nueva posicion de ventana. "
+                f"Detalle: {details}"
+            )
+            return
+
+        should_keep_new = False
+        with self._lock:
+            if session_id == self._record_session_id and self._record_process is process:
+                self._record_process = new_process
+                self._record_output_path = next_output_path
+                self._record_tracking_region = target_region
+                self._record_segment_paths.append(next_output_path)
+                self._record_last_rotation_at = time.monotonic()
+                self._record_rotation_in_progress = False
+                should_keep_new = True
+            else:
+                self._record_rotation_in_progress = False
+
+        if not should_keep_new:
+            self._terminate_record_process_quietly(new_process, timeout=4)
+            return
+
+        self._record_reader_thread = threading.Thread(
+            target=self._stream_record_output,
+            args=(new_process,),
+            daemon=True,
+        )
+        self._record_reader_thread.start()
+
+        x, y, width, height = target_region
+        self._emit_log(
+            "[PISTA] Se ajusto la region de grabacion al mover la ventana D3D "
+            f"({width}x{height} en x={x}, y={y})."
+        )
+
+        self._terminate_record_process_quietly(process, timeout=8)
+
+    def _build_segment_output_path(self, base_output_path: Path, segment_index: int) -> Path:
+        return base_output_path.with_name(
+            f"{base_output_path.stem}_seg{segment_index:03d}{base_output_path.suffix}"
+        )
+
+    def _concat_recording_segments(
+        self,
+        ffmpeg_path: Path,
+        segment_paths: list[Path],
+        base_output_path: Path,
+    ) -> Path | None:
+        existing_segments = [path for path in segment_paths if path.exists()]
+        if not existing_segments:
+            return None
+        if len(existing_segments) == 1:
+            return existing_segments[0]
+
+        concat_file_path: Path | None = None
+        merged_output = base_output_path.with_name(
+            f"{base_output_path.stem}_merged{base_output_path.suffix}"
+        )
+
+        try:
+            if merged_output.exists():
+                merged_output.unlink()
+        except OSError:
+            pass
+
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                newline="\n",
+                delete=False,
+                suffix=".txt",
+            ) as concat_file:
+                concat_file_path = Path(concat_file.name)
+                for segment in existing_segments:
+                    normalized = segment.resolve().as_posix().replace("'", "'\\''")
+                    concat_file.write(f"file '{normalized}'\n")
+
+            if not self._run_concat_segments(
+                ffmpeg_path=ffmpeg_path,
+                concat_file_path=concat_file_path,
+                output_path=merged_output,
+                copy_mode=True,
+            ):
+                if not self._run_concat_segments(
+                    ffmpeg_path=ffmpeg_path,
+                    concat_file_path=concat_file_path,
+                    output_path=merged_output,
+                    copy_mode=False,
+                ):
+                    self._emit_log(
+                        "[ADVERTENCIA] No se pudieron unir los segmentos de grabacion. "
+                        "Se conservara el ultimo segmento."
+                    )
+                    return existing_segments[-1]
+
+            final_output = base_output_path
+            try:
+                if final_output.exists():
+                    final_output.unlink()
+                merged_output.replace(final_output)
+            except OSError:
+                final_output = merged_output
+
+            for segment in existing_segments:
+                if segment == final_output:
+                    continue
+                try:
+                    segment.unlink()
+                except OSError:
+                    pass
+
+            self._emit_log(
+                f"[PISTA] Grabacion consolidada en un solo archivo ({len(existing_segments)} segmentos)."
+            )
+            return final_output
+        finally:
+            if concat_file_path is not None:
+                try:
+                    concat_file_path.unlink()
+                except OSError:
+                    pass
+
+    def _run_concat_segments(
+        self,
+        ffmpeg_path: Path,
+        concat_file_path: Path,
+        output_path: Path,
+        copy_mode: bool,
+    ) -> bool:
+        command = [
+            str(ffmpeg_path),
+            "-hide_banner",
+            "-loglevel",
+            "warning",
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(concat_file_path),
+        ]
+
+        if copy_mode:
+            command.extend(["-c", "copy"])
+        else:
+            command.extend(
+                [
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-crf",
+                    "18",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-an",
+                ]
+            )
+
+        command.extend(["-movflags", "+faststart", str(output_path)])
+        result = subprocess.run(
+            command,
+            cwd=str(ffmpeg_path.parent),
+            capture_output=True,
+            text=True,
+            creationflags=self._creationflags(),
+            startupinfo=self._startupinfo(),
+            check=False,
+        )
+        if result.returncode == 0 and output_path.exists():
+            return True
+        return False
+
+    def _terminate_record_process_quietly(self, process: subprocess.Popen[str], timeout: int = 8) -> None:
+        if process.poll() is not None:
+            return
+        try:
+            if process.stdin is not None:
+                process.stdin.write("q\n")
+                process.stdin.flush()
+            process.wait(timeout=timeout)
+            return
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+
+        process.terminate()
+        try:
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=2)
 
     def _resolve_window_region(self, window_source: str) -> tuple[int, int, int, int] | None:
         if os.name != "nt":
