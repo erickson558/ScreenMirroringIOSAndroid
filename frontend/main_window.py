@@ -366,20 +366,17 @@ class MainWindow:
         if announce_init:
             self._append_log(self._tr("app_initialized"))
 
-    # Create invisible preview frame for recording coordinate reference
-    # NOT shown in GUI, but needed for window embedding and ffmpeg capture region
-    self._preview_host_frame = tk.Frame(root, width=540, height=960, bg="#030712")
-    # Intentionally NOT gridded - frame is invisible but accessible for sizing
-    self._preview_host_frame.grid_propagate(False)
+        # Create invisible preview frame for recording coordinate reference.
+        # NOT shown in GUI, but needed for window embedding and ffmpeg capture region.
+        # Place it as a child of `root` so coordinate queries work (winfo_rootx/y).
+        self._preview_host_frame = tk.Frame(root, width=540, height=960, bg="#030712")
+        # Intentionally NOT gridded - frame is invisible but accessible for sizing
+        self._preview_host_frame.grid_propagate(False)
 
-    # Invisible overlay label (referenced by embedding code)
-    self._preview_overlay = tk.Label(
-        self._preview_host_frame,
-        text="",
-        bg="#030712",
-    )
-    # Also invisible - just a placeholder
-    self._preview_hint_var = tk.StringVar(value="")
+        # Invisible overlay label (referenced by embedding code)
+        self._preview_overlay = tk.Label(self._preview_host_frame, text="", bg="#030712")
+        # Hint var kept empty (preview removed)
+        self._preview_hint_var = tk.StringVar(value="")
 
     def _build_preview_tab(self, parent: ttk.Frame) -> None:
         parent.rowconfigure(0, weight=1)
