@@ -798,38 +798,48 @@ class UxPlayService:
             return False
 
         WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        CHILDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
         visible_found = [False]
 
-        def enum_proc(hwnd: int, _lparam: int) -> bool:
+        def is_qualifying_window(hwnd: int) -> bool:
             if not user32.IsWindowVisible(hwnd):
-                return True
+                return False
 
             owner_pid = wintypes.DWORD()
             user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner_pid))
             if int(owner_pid.value) != pid:
-                return True
-
-            title_len = int(user32.GetWindowTextLengthW(hwnd))
-            if title_len <= 0:
-                return True
-
-            buffer = ctypes.create_unicode_buffer(title_len + 1)
-            user32.GetWindowTextW(hwnd, buffer, title_len + 1)
-            title = buffer.value.strip()
-            if not title:
-                return True
+                return False
 
             rect = wintypes.RECT()
             if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
-                return True
+                return False
 
             width = int(rect.right) - int(rect.left)
             height = int(rect.bottom) - int(rect.top)
             if width < 120 or height < 120:
+                return False
+
+            return True
+
+        def child_enum_proc(child_hwnd: int, _lparam: int) -> bool:
+            if is_qualifying_window(child_hwnd):
+                visible_found[0] = True
+                return False
+            return True
+
+        def enum_proc(hwnd: int, _lparam: int) -> bool:
+            if is_qualifying_window(hwnd):
+                visible_found[0] = True
+                return False
+
+            try:
+                user32.EnumChildWindows(hwnd, CHILDENUMPROC(child_enum_proc), 0)
+            except (AttributeError, OSError):
                 return True
 
-            visible_found[0] = True
-            return False
+            if visible_found[0]:
+                return False
+            return True
 
         try:
             user32.EnumWindows(WNDENUMPROC(enum_proc), 0)

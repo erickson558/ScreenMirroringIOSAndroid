@@ -101,6 +101,8 @@ class MainWindow:
         self._ntp_error_count = 0
         self._ntp_hint_shown = False
         self._record_suggested_name: str | None = None
+        self._record_stop_requested = False
+        self._recording_was_active = False
         self._animation_after_id: str | None = None
         self._animation_phase = 0.0
         self._intro_alpha = 1.0
@@ -1144,6 +1146,8 @@ class MainWindow:
                 self._set_status(self._tr("warn_choose_recording_path"), "warning")
                 return
 
+            self._record_stop_requested = True
+
             def stop_recording() -> None:
                 self._controller.stop_recording(output_path=save_path)
 
@@ -1165,6 +1169,7 @@ class MainWindow:
 
         started_at = datetime.now()
         self._record_suggested_name = f"grabacion_{started_at.strftime('%Y%m%d_%H%M%S')}.mp4"
+        self._record_stop_requested = False
         temp_path = Path(tempfile.gettempdir()) / f"ScreenMirrorIOSAndroid_{started_at.strftime('%Y%m%d_%H%M%S_%f')}.mp4"
         capture_window_source = self._capture_title_var.get().strip()
         if os.name == "nt" and self._embedded_window_hwnd is not None:
@@ -1239,6 +1244,28 @@ class MainWindow:
                         busy=False,
                     )
             elif event.kind == "recording":
+                if self._recording_was_active and not event.recording:
+                    if self._record_stop_requested:
+                        self._record_stop_requested = False
+                    else:
+                        recovered_path = self._default_recording_output_path()
+                        self._append_log(
+                            "[ADVERTENCIA] La grabacion se detuvo por desconexion/cambio de receptor. "
+                            "Se intentara guardar automaticamente."
+                        )
+
+                        def recover_recording_file() -> None:
+                            self._controller.stop_recording(output_path=recovered_path)
+
+                        self._run_in_background(
+                            action_label=self._tr("action_stop_recording_due_receiver_stop"),
+                            fn=recover_recording_file,
+                            success_status=self._tr(
+                                "success_stop_recording_due_receiver_stop",
+                                path=recovered_path,
+                            ),
+                            busy=False,
+                        )
                 self._set_record_state(event.recording)
 
         self._root.after(self.POLL_INTERVAL_MS, self._poll_events)
@@ -1532,12 +1559,14 @@ class MainWindow:
             self._btn_record.configure(text=self._tr("btn_stop_recording"), underline=0, style="Danger.TButton")
             self._pill_record.configure(bg="#3a1424", fg="#ff8cad", highlightbackground="#cf2f61")
             self._set_status(self._tr("status_recording_running"), "success")
+            self._recording_was_active = True
             return
 
         self._record_suggested_name = None
         self._record_status_var.set(self._tr("record_status_inactive"))
         self._btn_record.configure(text=self._tr("btn_record"), underline=0, style="Danger.TButton")
         self._pill_record.configure(bg="#1d304d", fg="#9fc9ff", highlightbackground="#365c8f")
+        self._recording_was_active = False
 
     def _append_log(self, message: str) -> None:
         localized_message = localize_log(self._language_code, message)
