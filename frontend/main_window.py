@@ -343,16 +343,15 @@ class MainWindow:
         self._build_card_receiver(left)
         self._build_card_stream(left)
         self._build_card_capture(left)
+        # add preview card below capture controls so UxPlay window is visible on left
+        self._build_card_preview(left)
 
         self._content_tabs = ttk.Notebook(right)
         self._content_tabs.grid(row=0, column=0, sticky="nsew")
 
-        # Preview tab removed - only show logs
-        self._preview_tab = None
+        # Only logs tab is needed (preview is now displayed along left column)
         self._logs_tab = ttk.Frame(self._content_tabs, style="Root.TFrame")
         self._content_tabs.add(self._logs_tab, text=self._tr("tab_logs"))
-
-        # Skip preview tab building
         self._build_logs_tab(self._logs_tab)
 
         status_wrap = ttk.Frame(root, style="Root.TFrame")
@@ -366,24 +365,15 @@ class MainWindow:
         if announce_init:
             self._append_log(self._tr("app_initialized"))
 
-        # Create invisible preview frame for recording coordinate reference.
-        # NOT shown in GUI, but needed for window embedding and ffmpeg capture region.
-        # Place it as a child of `root` so coordinate queries work (winfo_rootx/y).
-        self._preview_host_frame = tk.Frame(root, width=540, height=960, bg="#030712")
-        # Intentionally NOT gridded - frame is invisible but accessible for sizing
-        self._preview_host_frame.grid_propagate(False)
 
-        # Invisible overlay label (referenced by embedding code)
-        self._preview_overlay = tk.Label(self._preview_host_frame, text="", bg="#030712")
-        # Hint var kept empty (preview removed)
-        self._preview_hint_var = tk.StringVar(value="")
 
-    def _build_preview_tab(self, parent: ttk.Frame) -> None:
-        parent.rowconfigure(0, weight=1)
-        parent.columnconfigure(0, weight=1)
-
+    def _build_card_preview(self, parent: ttk.Frame) -> None:
+        # Visible preview area that hosts the uxplay window.  This replicates the
+        # previous "preview tab" design but places the panel in the left column.
+        # The preview card should expand to fill remaining vertical space in the
+        # left pane, so pack it with expand=True.
         preview_card = ttk.LabelFrame(parent, text=self._tr("card_live_preview"), style="Card.TLabelframe", padding=10)
-        preview_card.grid(row=0, column=0, sticky="nsew")
+        preview_card.pack(fill="both", expand=True, pady=(10, 0))
         preview_card.rowconfigure(0, weight=1)
         preview_card.columnconfigure(0, weight=1)
 
@@ -1200,7 +1190,7 @@ class MainWindow:
                 else:
                     raise OSError("GetWindowRect falló")
             except Exception:
-                # fallback to preview frame coordinates (may not be mapped)
+                # fallback to preview frame coordinates (should now always be mapped)
                 x = self._preview_host_frame.winfo_rootx()
                 y = self._preview_host_frame.winfo_rooty()
                 w = self._preview_host_frame.winfo_width()
@@ -1209,6 +1199,13 @@ class MainWindow:
                 self._append_log("[PISTA] Grabacion usando region del frame de preview (fallback).")
         else:
             capture_window_source = f"hwnd=0x{self._embedded_window_hwnd:X}" if self._embedded_window_hwnd else capture_window_source
+
+        # ensure region dimensions are sane before trying to record
+        if capture_region is not None:
+            _, _, rw, rh = capture_region
+            if rw < 16 or rh < 16:
+                self._append_log("[ERROR] Region de captura invalida (demasiado pequena)")
+                return
 
         def start_recording() -> None:
             self._controller.start_recording(
