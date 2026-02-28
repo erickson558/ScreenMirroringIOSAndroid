@@ -515,11 +515,16 @@ class CaptureService:
                     seen_sources.add(hwnd_source)
                     sources.append(hwnd_source)
 
-            title_source = f"title={title}"
-            if title_source in seen_sources:
+                title_source = f"title={title}"
+                if title_source not in seen_sources:
+                    seen_sources.add(title_source)
+                    sources.append(title_source)
+            else:
+                # If no hwnd was found for this title, avoid appending a
+                # title= source that would cause ffmpeg to immediately fail
+                # with "Can't find window". We'll rely on hwnd-based
+                # detection or the process-based fallback instead.
                 continue
-            seen_sources.add(title_source)
-            sources.append(title_source)
 
         # If no candidate hwnds/titles found, try to locate a top-level window
         # belonging to the UxPlay process (fallback for cases where the video
