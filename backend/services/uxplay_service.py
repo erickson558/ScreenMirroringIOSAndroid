@@ -73,7 +73,7 @@ class UxPlayService:
         receiver_name: str,
         extra_args: list[str] | None = None,
         append_hostname_suffix: bool = True,
-        preferred_interface_alias: str | None = None,
+        preferred_interface_alias: str | None = None,  # ignored in this legacy version
         _from_auto_recovery: bool = False,
     ) -> None:
         launched: list[tuple[subprocess.Popen[str], str | None]] = []
@@ -94,6 +94,11 @@ class UxPlayService:
 
             receiver_name = self._sanitize_receiver_name(receiver_name)
             runtime_args = [arg.strip() for arg in (extra_args or []) if arg and arg.strip()]
+            # ``preferred_interface_alias`` is accepted by newer versions of
+            # this service but ignored in the original implementation; we
+            # consume it here to prevent unexpected argument errors.
+            _ = preferred_interface_alias
+
             runtime_args = [arg for arg in runtime_args if arg.lower() != "-nh"]
             if not append_hostname_suffix:
                 runtime_args = ["-nh", *runtime_args]
