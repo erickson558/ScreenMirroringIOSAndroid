@@ -347,12 +347,12 @@ class MainWindow:
         self._content_tabs = ttk.Notebook(right)
         self._content_tabs.grid(row=0, column=0, sticky="nsew")
 
-        self._preview_tab = ttk.Frame(self._content_tabs, style="Root.TFrame")
+        # Preview tab removed - only show logs
+        self._preview_tab = None
         self._logs_tab = ttk.Frame(self._content_tabs, style="Root.TFrame")
-        self._content_tabs.add(self._preview_tab, text=self._tr("tab_preview"))
         self._content_tabs.add(self._logs_tab, text=self._tr("tab_logs"))
 
-        self._build_preview_tab(self._preview_tab)
+        # Skip preview tab building
         self._build_logs_tab(self._logs_tab)
 
         status_wrap = ttk.Frame(root, style="Root.TFrame")
@@ -365,6 +365,21 @@ class MainWindow:
 
         if announce_init:
             self._append_log(self._tr("app_initialized"))
+
+    # Create invisible preview frame for recording coordinate reference
+    # NOT shown in GUI, but needed for window embedding and ffmpeg capture region
+    self._preview_host_frame = tk.Frame(root, width=540, height=960, bg="#030712")
+    # Intentionally NOT gridded - frame is invisible but accessible for sizing
+    self._preview_host_frame.grid_propagate(False)
+
+    # Invisible overlay label (referenced by embedding code)
+    self._preview_overlay = tk.Label(
+        self._preview_host_frame,
+        text="",
+        bg="#030712",
+    )
+    # Also invisible - just a placeholder
+    self._preview_hint_var = tk.StringVar(value="")
 
     def _build_preview_tab(self, parent: ttk.Frame) -> None:
         parent.rowconfigure(0, weight=1)
@@ -1447,6 +1462,9 @@ class MainWindow:
         if self._embedded_window_hwnd is not None and self._embedded_window_hwnd != hwnd:
             self._release_embedded_window()
 
+        # Window is embedded but not shown in preview tab anymore
+        # (that tab was removed to show only logs)
+
         GWL_STYLE = -16
         WS_VISIBLE = 0x10000000
         WS_CAPTION = 0x00C00000
@@ -1470,8 +1488,8 @@ class MainWindow:
         self._embedded_window_hwnd = hwnd
         self._embedded_original_style = original_style
         self._preview_overlay.place_forget()
-        self._set_preview_hint(self._tr("preview_hint_embedded"))
-        self._content_tabs.select(self._preview_tab)
+        # Preview tab was removed - no tab selection needed
+        # self._content_tabs.select(self._preview_tab)
         self._resize_embedded_window()
         return True
 
