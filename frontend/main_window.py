@@ -1,8 +1,11 @@
 ﻿from __future__ import annotations
 
 from collections.abc import Callable
+import ctypes
+from ctypes import wintypes
 from datetime import datetime
 import math
+import os
 from pathlib import Path
 import shlex
 import tempfile
@@ -34,6 +37,8 @@ class MainWindow:
     POLL_INTERVAL_MS = 150
     SAVE_DEBOUNCE_MS = 300
     _BIND_TARGET_AUTO = "__auto__"
+    _EMBED_RETRY_DELAY_MS = 450
+    _EMBED_MAX_RETRIES = 24
 
     def __init__(
         self,
@@ -106,6 +111,11 @@ class MainWindow:
         self._bind_target_buttons: list[ttk.Radiobutton] = []
         self._bind_target_choices: list[tuple[str, str]] = []
         self._startup_receiver_requested = False
+        self._embed_retry_after_id: str | None = None
+        self._embed_retry_left = 0
+        self._embedded_window_hwnd: int | None = None
+        self._embedded_original_parent: int | None = None
+        self._embedded_original_style: int | None = None
 
         self._build_ui()
         self._refresh_bind_targets(log_change=False)
@@ -331,7 +341,72 @@ class MainWindow:
         self._build_card_stream(left)
         self._build_card_capture(left)
 
-        logs_card = ttk.LabelFrame(right, text=self._tr("card_runtime_logs"), style="Card.TLabelframe", padding=8)
+        self._content_tabs = ttk.Notebook(right)
+        self._content_tabs.grid(row=0, column=0, sticky="nsew")
+
+        self._preview_tab = ttk.Frame(self._content_tabs, style="Root.TFrame")
+        self._logs_tab = ttk.Frame(self._content_tabs, style="Root.TFrame")
+        self._content_tabs.add(self._preview_tab, text=self._tr("tab_preview"))
+        self._content_tabs.add(self._logs_tab, text=self._tr("tab_logs"))
+
+        self._build_preview_tab(self._preview_tab)
+        self._build_logs_tab(self._logs_tab)
+
+        status_wrap = ttk.Frame(root, style="Root.TFrame")
+        status_wrap.pack(fill="x", pady=(8, 0))
+        self._status_label = ttk.Label(status_wrap, textvariable=self._status_var, style="Status.TLabel")
+        self._status_label.pack(side="left", fill="x", expand=True)
+        ttk.Label(status_wrap, text=self._tr("version_label", version=self._app_version), style="Version.TLabel").pack(
+            side="right"
+        )
+
+        if announce_init:
+            self._append_log(self._tr("app_initialized"))
+
+    def _build_preview_tab(self, parent: ttk.Frame) -> None:
+        parent.rowconfigure(0, weight=1)
+        parent.columnconfigure(0, weight=1)
+
+        preview_card = ttk.LabelFrame(parent, text=self._tr("card_live_preview"), style="Card.TLabelframe", padding=10)
+        preview_card.grid(row=0, column=0, sticky="nsew")
+        preview_card.rowconfigure(0, weight=1)
+        preview_card.columnconfigure(0, weight=1)
+
+        self._preview_host_frame = tk.Frame(
+            preview_card,
+            bg="#030712",
+            highlightthickness=1,
+            highlightbackground="#28456b",
+            bd=0,
+        )
+        self._preview_host_frame.grid(row=0, column=0, sticky="nsew")
+        self._preview_host_frame.bind("<Configure>", self._on_preview_host_resized)
+
+        self._preview_overlay = tk.Label(
+            self._preview_host_frame,
+            text=self._tr("preview_placeholder"),
+            font=("Segoe UI", 11),
+            bg="#030712",
+            fg="#7fa3d7",
+            justify="center",
+        )
+        self._preview_overlay.place(relx=0.5, rely=0.5, anchor="center")
+
+        self._preview_hint_var = tk.StringVar(value=self._tr("preview_hint_idle"))
+        self._preview_hint_label = ttk.Label(
+            preview_card,
+            textvariable=self._preview_hint_var,
+            style="Hint.TLabel",
+            wraplength=500,
+            justify="left",
+        )
+        self._preview_hint_label.grid(row=1, column=0, sticky="w", pady=(8, 0))
+
+    def _build_logs_tab(self, parent: ttk.Frame) -> None:
+        parent.rowconfigure(0, weight=1)
+        parent.columnconfigure(0, weight=1)
+
+        logs_card = ttk.LabelFrame(parent, text=self._tr("card_runtime_logs"), style="Card.TLabelframe", padding=8)
         logs_card.grid(row=0, column=0, sticky="nsew")
         logs_card.rowconfigure(0, weight=1)
         logs_card.columnconfigure(0, weight=1)
@@ -351,17 +426,6 @@ class MainWindow:
         self._log_box.tag_configure("warning", foreground="#fbbf24")
         self._log_box.tag_configure("hint", foreground="#67e8f9")
         self._log_box.tag_configure("recording", foreground="#f472b6")
-
-        status_wrap = ttk.Frame(root, style="Root.TFrame")
-        status_wrap.pack(fill="x", pady=(8, 0))
-        self._status_label = ttk.Label(status_wrap, textvariable=self._status_var, style="Status.TLabel")
-        self._status_label.pack(side="left", fill="x", expand=True)
-        ttk.Label(status_wrap, text=self._tr("version_label", version=self._app_version), style="Version.TLabel").pack(
-            side="right"
-        )
-
-        if announce_init:
-            self._append_log(self._tr("app_initialized"))
 
     def _build_menu(self) -> None:
         self._menu_bar = tk.Menu(self._root)
@@ -713,6 +777,7 @@ class MainWindow:
 
     def _rebuild_ui_for_language(self) -> None:
         current_geometry = self._root.geometry()
+        self._release_embedded_window()
         source_mode = self._capture_source_mode_from_value(self._capture_source_var.get())
         self._capture_source_var.set(self._capture_source_label(source_mode))
         self._device_hint_var.set(self._device_mode_description(self._selected_device_mode()))
@@ -1101,13 +1166,17 @@ class MainWindow:
         started_at = datetime.now()
         self._record_suggested_name = f"grabacion_{started_at.strftime('%Y%m%d_%H%M%S')}.mp4"
         temp_path = Path(tempfile.gettempdir()) / f"ScreenMirrorIOSAndroid_{started_at.strftime('%Y%m%d_%H%M%S_%f')}.mp4"
+        capture_window_source = self._capture_title_var.get().strip()
+        if os.name == "nt" and self._embedded_window_hwnd is not None:
+            capture_window_source = f"hwnd=0x{self._embedded_window_hwnd:X}"
+            self._append_log("[PISTA] Grabacion enfocada al panel integrado de previsualizacion.")
 
         def start_recording() -> None:
             self._controller.start_recording(
                 uxplay_path=Path(self._uxplay_path_var.get().strip()),
                 output_path=temp_path,
                 source_mode="window",
-                window_title=self._capture_title_var.get().strip(),
+                window_title=capture_window_source,
                 fps=int(self._capture_fps_var.get()),
             )
 
@@ -1183,6 +1252,9 @@ class MainWindow:
             self._set_status(self._tr("status_receiver_ready_connect"), "success")
         if "raop_rtp_mirror starting mirroring" in low:
             self._set_status(self._tr("status_airplay_connected"), "info")
+            self._schedule_embed_window("[PISTA] Intentando acoplar ventana de video al panel integrado...")
+        if "begin streaming to gstreamer video pipeline" in low:
+            self._schedule_embed_window()
         if "reiniciando receptor automáticamente" in low or "reiniciando receptor automaticamente" in low:
             self._set_status(self._tr("status_recovering_first_link"), "warning")
         if "receptor reiniciado automáticamente" in low or "receptor reiniciado automaticamente" in low:
@@ -1197,11 +1269,245 @@ class MainWindow:
             self._append_log(self._tr("hint_ntp_skew"))
             self._set_status(self._tr("status_ntp_skew"), "warning")
 
+    def _on_preview_host_resized(self, _event: tk.Event[tk.Misc]) -> None:
+        self._resize_embedded_window()
+
+    def _schedule_embed_window(self, announce_log: str | None = None) -> None:
+        if os.name != "nt":
+            return
+        if self._selected_device_mode() != DEVICE_MODE_IPHONE:
+            return
+        if not self._controller.is_running():
+            return
+        if announce_log:
+            self._append_log(announce_log)
+
+        self._embed_retry_left = max(self._embed_retry_left, self._EMBED_MAX_RETRIES)
+        if self._embed_retry_after_id is None:
+            self._embed_retry_after_id = self._root.after(120, self._attempt_embed_window)
+
+    def _attempt_embed_window(self) -> None:
+        self._embed_retry_after_id = None
+        if self._closing:
+            return
+        if os.name != "nt":
+            return
+        if self._selected_device_mode() != DEVICE_MODE_IPHONE or not self._controller.is_running():
+            return
+
+        if self._embedded_window_hwnd is not None:
+            try:
+                user32 = ctypes.windll.user32
+                if user32.IsWindow(self._embedded_window_hwnd):
+                    self._resize_embedded_window()
+                    self._preview_overlay.place_forget()
+                    self._set_preview_hint(self._tr("preview_hint_embedded"))
+                    return
+            except (AttributeError, OSError):
+                pass
+
+        target_hwnd = self._find_uxplay_preview_window()
+        if target_hwnd is not None and self._embed_window_into_preview(target_hwnd):
+            self._append_log("[PISTA] Ventana de iPhone acoplada al panel integrado de la app.")
+            return
+
+        self._embed_retry_left = max(0, self._embed_retry_left - 1)
+        if self._embed_retry_left > 0:
+            self._embed_retry_after_id = self._root.after(self._EMBED_RETRY_DELAY_MS, self._attempt_embed_window)
+            return
+
+        self._set_preview_hint(self._tr("preview_hint_not_found"))
+
+    def _find_uxplay_preview_window(self) -> int | None:
+        if os.name != "nt":
+            return None
+
+        try:
+            user32 = ctypes.windll.user32
+        except AttributeError:
+            return None
+
+        process_ids = set(self._controller.list_receiver_process_ids())
+        if not process_ids:
+            return None
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        candidates: list[tuple[int, int]] = []
+
+        def enum_proc(hwnd: int, _lparam: int) -> bool:
+            if hwnd <= 0:
+                return True
+            if not user32.IsWindow(hwnd):
+                return True
+
+            owner_pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner_pid))
+            pid = int(owner_pid.value)
+            if pid not in process_ids:
+                return True
+
+            title_len = int(user32.GetWindowTextLengthW(hwnd))
+            if title_len <= 0:
+                return True
+
+            title_buf = ctypes.create_unicode_buffer(title_len + 1)
+            user32.GetWindowTextW(hwnd, title_buf, title_len + 1)
+            title = title_buf.value.strip()
+            if not title:
+                return True
+
+            low = title.lower()
+            score = 0
+            if "direct3d11 renderer" in low:
+                score = 30
+            elif "renderer" in low:
+                score = 20
+            elif "uxplay" in low:
+                score = 10
+            if score <= 0:
+                return True
+
+            candidates.append((score, int(hwnd)))
+            return True
+
+        try:
+            user32.EnumWindows(WNDENUMPROC(enum_proc), 0)
+        except (AttributeError, OSError):
+            return None
+
+        if not candidates:
+            return None
+
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        return candidates[0][1]
+
+    def _embed_window_into_preview(self, hwnd: int) -> bool:
+        if os.name != "nt":
+            return False
+        if hwnd <= 0:
+            return False
+
+        try:
+            user32 = ctypes.windll.user32
+        except AttributeError:
+            return False
+
+        if not user32.IsWindow(hwnd):
+            return False
+
+        host_hwnd = int(self._preview_host_frame.winfo_id())
+        if host_hwnd <= 0:
+            return False
+
+        if self._embedded_window_hwnd is not None and self._embedded_window_hwnd != hwnd:
+            self._release_embedded_window()
+
+        GWL_STYLE = -16
+        WS_CHILD = 0x40000000
+        WS_VISIBLE = 0x10000000
+        WS_CAPTION = 0x00C00000
+        WS_THICKFRAME = 0x00040000
+        WS_MINIMIZEBOX = 0x00020000
+        WS_MAXIMIZEBOX = 0x00010000
+        WS_SYSMENU = 0x00080000
+        WS_POPUP = 0x80000000
+
+        original_parent = int(user32.GetParent(hwnd))
+        original_style = int(user32.GetWindowLongW(hwnd, GWL_STYLE))
+        new_style = original_style
+        new_style &= ~(
+            WS_CAPTION
+            | WS_THICKFRAME
+            | WS_MINIMIZEBOX
+            | WS_MAXIMIZEBOX
+            | WS_SYSMENU
+            | WS_POPUP
+        )
+        new_style |= WS_CHILD | WS_VISIBLE
+
+        user32.SetParent(hwnd, host_hwnd)
+        user32.SetWindowLongW(hwnd, GWL_STYLE, new_style)
+        user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0027)  # SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_FRAMECHANGED
+        user32.ShowWindow(hwnd, 5)  # SW_SHOW
+
+        self._embedded_window_hwnd = hwnd
+        self._embedded_original_parent = original_parent
+        self._embedded_original_style = original_style
+        self._preview_overlay.place_forget()
+        self._set_preview_hint(self._tr("preview_hint_embedded"))
+        self._content_tabs.select(self._preview_tab)
+        self._resize_embedded_window()
+        return True
+
+    def _resize_embedded_window(self) -> None:
+        if os.name != "nt":
+            return
+        hwnd = self._embedded_window_hwnd
+        if hwnd is None:
+            return
+
+        try:
+            user32 = ctypes.windll.user32
+        except AttributeError:
+            return
+
+        if not user32.IsWindow(hwnd):
+            self._embedded_window_hwnd = None
+            self._preview_overlay.place(relx=0.5, rely=0.5, anchor="center")
+            self._set_preview_hint(self._tr("preview_hint_wait_stream"))
+            return
+
+        width = max(64, int(self._preview_host_frame.winfo_width()))
+        height = max(64, int(self._preview_host_frame.winfo_height()))
+        user32.MoveWindow(hwnd, 0, 0, width, height, True)
+
+    def _release_embedded_window(self) -> None:
+        if self._embed_retry_after_id is not None:
+            self._root.after_cancel(self._embed_retry_after_id)
+            self._embed_retry_after_id = None
+        self._embed_retry_left = 0
+
+        hwnd = self._embedded_window_hwnd
+        self._embedded_window_hwnd = None
+
+        if os.name == "nt" and hwnd is not None:
+            try:
+                user32 = ctypes.windll.user32
+                if user32.IsWindow(hwnd):
+                    GWL_STYLE = -16
+                    if self._embedded_original_parent is not None:
+                        user32.SetParent(hwnd, self._embedded_original_parent)
+                    else:
+                        user32.SetParent(hwnd, 0)
+                    if self._embedded_original_style is not None:
+                        user32.SetWindowLongW(hwnd, GWL_STYLE, int(self._embedded_original_style))
+                        user32.SetWindowPos(
+                            hwnd,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0x0027,  # SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_FRAMECHANGED
+                        )
+                    user32.ShowWindow(hwnd, 5)  # SW_SHOW
+            except (AttributeError, OSError):
+                pass
+
+        self._embedded_original_parent = None
+        self._embedded_original_style = None
+        self._preview_overlay.place(relx=0.5, rely=0.5, anchor="center")
+
+    def _set_preview_hint(self, message: str) -> None:
+        self._preview_hint_var.set(message)
+
     def _set_running_state(self, running: bool) -> None:
         if self._selected_device_mode() == DEVICE_MODE_ANDROID:
+            self._release_embedded_window()
             self._receiver_status_var.set(self._tr("receiver_status_android"))
             self._btn_receiver.configure(text=self._tr("btn_open_android_projection"), underline=0, style="Primary.TButton")
             self._pill_receiver.configure(bg="#1d304d", fg="#9fc9ff", highlightbackground="#365c8f")
+            self._set_preview_hint(self._tr("preview_hint_android"))
             return
 
         if running:
@@ -1209,12 +1515,16 @@ class MainWindow:
             self._btn_receiver.configure(text=self._tr("btn_stop_receiver"), underline=0, style="Danger.TButton")
             self._pill_receiver.configure(bg="#103026", fg="#72f2de", highlightbackground="#18c3ae")
             self._set_status(self._tr("status_receiver_running"), "success")
+            self._set_preview_hint(self._tr("preview_hint_wait_stream"))
+            self._schedule_embed_window()
             return
 
+        self._release_embedded_window()
         self._receiver_status_var.set(self._tr("receiver_status_stopped"))
         self._btn_receiver.configure(text=self._tr("btn_start_receiver"), underline=0, style="Primary.TButton")
         self._pill_receiver.configure(bg="#2b1620", fg="#ff8aa0", highlightbackground="#cc2a56")
         self._set_status(self._tr("status_receiver_stopped_short"), "info")
+        self._set_preview_hint(self._tr("preview_hint_idle"))
 
     def _set_record_state(self, recording: bool) -> None:
         if recording:
@@ -1400,6 +1710,7 @@ class MainWindow:
         if self._save_after_id is not None:
             self._root.after_cancel(self._save_after_id)
             self._save_after_id = None
+        self._release_embedded_window()
         self._save_config()
         self._set_status(self._tr("status_app_closing"), "info")
 

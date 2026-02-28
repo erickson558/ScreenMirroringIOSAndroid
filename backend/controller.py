@@ -60,6 +60,9 @@ class AppController:
     def is_running(self) -> bool:
         return self._service.is_running
 
+    def list_receiver_process_ids(self) -> list[int]:
+        return self._service.list_process_ids()
+
     def list_airplay_interfaces(self) -> list[tuple[str, str]]:
         return self._service.list_available_interfaces()
 

@@ -57,6 +57,16 @@ class UxPlayService:
             self._prune_dead_processes_locked()
             return bool(self._processes)
 
+    def list_process_ids(self) -> list[int]:
+        with self._lock:
+            self._prune_dead_processes_locked()
+            pids: list[int] = []
+            for process in self._processes.values():
+                pid = process.pid or 0
+                if pid > 0:
+                    pids.append(pid)
+            return pids
+
     def start(
         self,
         uxplay_path: Path,

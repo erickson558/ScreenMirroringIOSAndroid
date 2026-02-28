@@ -428,8 +428,20 @@ class CaptureService:
         return "desktop"
 
     def _window_capture_sources(self, window_title: str) -> list[str]:
+        normalized_input = " ".join(window_title.split()).strip()
+        low_input = normalized_input.lower()
+
+        if low_input.startswith("hwnd="):
+            hwnd = self._parse_hwnd_value(normalized_input.split("=", 1)[1])
+            if hwnd is not None:
+                return [f"hwnd=0x{hwnd:X}", f"hwnd={hwnd}"]
+
+        explicit_title = normalized_input
+        if low_input.startswith("title="):
+            explicit_title = " ".join(normalized_input.split("=", 1)[1].split()).strip()
+
         ordered_titles = [
-            window_title.strip(),
+            explicit_title,
             "Direct3D11 renderer",
             "UxPlay",
         ]
