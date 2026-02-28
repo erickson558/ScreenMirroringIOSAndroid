@@ -1189,14 +1189,24 @@ class MainWindow:
         capture_region: tuple[int, int, int, int] | None = None
         
         if os.name == "nt" and self._embedded_window_hwnd is not None:
-            # Use explicit screen region instead of hwnd for more reliable capture
-            capture_region = (
-                self._preview_host_frame.winfo_rootx(),
-                self._preview_host_frame.winfo_rooty(),
-                self._preview_host_frame.winfo_width(),
-                self._preview_host_frame.winfo_height(),
-            )
-            self._append_log("[PISTA] Grabacion usando region explicita del panel integrado.")
+            # determine capture region; prefer querying the actual uxplay window rect
+            try:
+                rect = wintypes.RECT()
+                if ctypes.windll.user32.GetWindowRect(self._embedded_window_hwnd, ctypes.byref(rect)):
+                    width = rect.right - rect.left
+                    height = rect.bottom - rect.top
+                    capture_region = (rect.left, rect.top, width, height)
+                    self._append_log("[PISTA] Grabacion usando region obtenida desde hwnd.")
+                else:
+                    raise OSError("GetWindowRect falló")
+            except Exception:
+                # fallback to preview frame coordinates (may not be mapped)
+                x = self._preview_host_frame.winfo_rootx()
+                y = self._preview_host_frame.winfo_rooty()
+                w = self._preview_host_frame.winfo_width()
+                h = self._preview_host_frame.winfo_height()
+                capture_region = (x, y, w, h)
+                self._append_log("[PISTA] Grabacion usando region del frame de preview (fallback).")
         else:
             capture_window_source = f"hwnd=0x{self._embedded_window_hwnd:X}" if self._embedded_window_hwnd else capture_window_source
 
@@ -1511,11 +1521,20 @@ class MainWindow:
             self._set_preview_hint(self._tr("preview_hint_wait_stream"))
             return
 
-        # compute absolute screen coordinates of the preview frame
-        x = self._preview_host_frame.winfo_rootx()
-        y = self._preview_host_frame.winfo_rooty()
-        width = max(64, int(self._preview_host_frame.winfo_width()))
-        height = max(64, int(self._preview_host_frame.winfo_height()))
+        # compute absolute screen coordinates of the preview frame or use a safe default
+        if self._preview_host_frame.winfo_ismapped() and self._preview_host_frame.winfo_width() > 1 and self._preview_host_frame.winfo_height() > 1:
+            x = self._preview_host_frame.winfo_rootx()
+            y = self._preview_host_frame.winfo_rooty()
+            width = max(64, int(self._preview_host_frame.winfo_width()))
+            height = max(64, int(self._preview_host_frame.winfo_height()))
+        else:
+            # preview frame not visible; place uxplay window at fixed location inside root
+            root_x = self._root.winfo_rootx()
+            root_y = self._root.winfo_rooty()
+            x = root_x + 50
+            y = root_y + 100
+            width = 540
+            height = 960
         SWP_NOZORDER = 0x0004
         SWP_NOACTIVATE = 0x0010
         user32.SetWindowPos(hwnd, 0, x, y, width, height, SWP_NOZORDER | SWP_NOACTIVATE)
