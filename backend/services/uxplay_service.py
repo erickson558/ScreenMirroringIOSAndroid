@@ -140,7 +140,6 @@ class UxPlayService:
                     self._mirror_started_at[key] = 0.0
                     self._ntp_error_counts[key] = 0
                     launched.append((process, instance_name if len(launch_plans) > 1 else None))
-                    command_logs.append(" ".join(command))
                     if instance_hint:
                         startup_hints.append(instance_hint)
             except Exception:
@@ -303,10 +302,11 @@ class UxPlayService:
             return [(receiver_name, runtime_args, None)]
 
         preferred_adapter = self._select_preferred_adapter(adapters, preferred_interface_alias)
-        adapter_name, mac = preferred_adapter if preferred_adapter is not None else adapters[0]
         vpn_active = self._is_windows_vpn_active()
 
+        # If VPN is active, prefer a single stable interface to avoid cross-network issues.
         if vpn_active:
+            adapter_name, mac = preferred_adapter if preferred_adapter is not None else adapters[0]
             primary_args = ["-m", mac, *runtime_args]
             if not self._has_explicit_sync_arg(primary_args):
                 primary_args = ["-vsync", "no", *primary_args]
@@ -317,21 +317,23 @@ class UxPlayService:
             )
             return [(receiver_name, primary_args, primary_hint)]
 
+        # If the user selected a specific adapter, use it.
         if preferred_adapter is not None:
+            adapter_name, mac = preferred_adapter
             primary_hint = f"[PISTA] Interfaz AirPlay seleccionada manualmente: {adapter_name} ({mac})."
-        else:
-            primary_hint = f"[PISTA] MAC AirPlay fijada automaticamente a {mac} ({adapter_name})."
-        primary_plan = (receiver_name, ["-m", mac, *runtime_args], primary_hint)
+            return [(receiver_name, ["-m", mac, *runtime_args], primary_hint)]
 
-        adapter_list = ", ".join(name for name, _mac in adapters)
-        multi_hint = (
-            f"[PISTA] MAC AirPlay fijada automaticamente a {mac} ({adapter_name}). "
-            f"Interfaces activas detectadas: {adapter_list}."
-        )
-        if preferred_adapter is None and len(adapters) > 1:
-            primary_plan = (receiver_name, ["-m", mac, *runtime_args], multi_hint)
+        # No preferred adapter: build plans for all active adapters to maximize
+        # discoverability. The first adapter keeps the base receiver name; others
+        # get a suffix so multiple instances don't collide and are visible.
+        plans: list[tuple[str, list[str], str | None]] = []
+        for idx, (adapter_name, mac) in enumerate(adapters):
+            instance_name = receiver_name if idx == 0 else f"{receiver_name} - {adapter_name}"
+            args = ["-m", mac, *runtime_args]
+            hint = f"[PISTA] Iniciando receptor en interfaz {adapter_name} ({mac})."
+            plans.append((instance_name, args, hint))
 
-        return [primary_plan]
+        return plans
 
     def _terminate_stale_uxplay_instances(self, uxplay_path: Path) -> int:
         if os.name != "nt":
