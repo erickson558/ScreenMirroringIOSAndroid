@@ -98,11 +98,12 @@ class UxPlayService:
             if not append_hostname_suffix:
                 runtime_args = ["-nh", *runtime_args]
             preferred_alias = self._normalize_interface_alias(preferred_interface_alias)
-            runtime_args, port_hint = self._ensure_legacy_ports(runtime_args)
-            runtime_args, persist_hint = self._ensure_window_persistence(runtime_args)
-            runtime_args, size_hint = self._ensure_window_size(runtime_args)
-            # Don't force D3D11 - it breaks AirPlay handshake on some systems
-            renderer_hint = None
+            
+            # Simplified: just use legacy ports and minimal args
+            # Don't add window/persistence/size args - let UxPlay handle it natively
+            if "-p" not in [arg.lower() for arg in runtime_args]:
+                runtime_args = ["-p", *runtime_args]
+            
             launch_plans = self._build_launch_plans(receiver_name, runtime_args, preferred_alias)
             self._last_start_request = _StartRequest(
                 uxplay_path=normalized_path,
@@ -167,16 +168,9 @@ class UxPlayService:
             )
         for hint in startup_hints:
             self._emit_log(hint)
-        if port_hint:
-            self._emit_log(port_hint)
-        if persist_hint:
-            self._emit_log(persist_hint)
-        if size_hint:
-            self._emit_log(size_hint)
-        if renderer_hint:
-            self._emit_log(renderer_hint)
+        self._emit_log("[PISTA] Se usa configuracion minimalista de UxPlay para maxima compatibilidad AirPlay.")
         self._emit_log(
-            "[PISTA] Espera a ver 'Initialized server socket(s)' antes de conectar en iPhone para evitar doble intento."
+            "[PISTA] Espera a ver 'Initialized server socket(s)' antes de conectar en iPhone."
         )
         if _from_auto_recovery:
             self._emit_log("[PISTA] Receptor reiniciado automaticamente para recuperar el primer enlace AirPlay.")
@@ -295,46 +289,10 @@ class UxPlayService:
         runtime_args: list[str],
         preferred_interface_alias: str | None = None,
     ) -> list[tuple[str, list[str], str | None]]:
-        if os.name != "nt" or self._has_explicit_mac_arg(runtime_args):
-            return [(receiver_name, runtime_args, None)]
-
-        adapters = self._resolve_windows_active_adapters()
-        if not adapters:
-            return [(receiver_name, runtime_args, None)]
-
-        preferred_adapter = self._select_preferred_adapter(adapters, preferred_interface_alias)
-        vpn_active = self._is_windows_vpn_active()
-
-        # If VPN is active, prefer a single stable interface to avoid cross-network issues.
-        if vpn_active:
-            adapter_name, mac = preferred_adapter if preferred_adapter is not None else adapters[0]
-            primary_args = ["-m", mac, *runtime_args]
-            if not self._has_explicit_sync_arg(primary_args):
-                primary_args = ["-vsync", "no", *primary_args]
-
-            primary_hint = (
-                f"[PISTA] VPN activa detectada: se fija interfaz principal '{adapter_name}' "
-                f"({mac}) para anuncio AirPlay unico y estable."
-            )
-            return [(receiver_name, primary_args, primary_hint)]
-
-        # If the user selected a specific adapter, use it.
-        if preferred_adapter is not None:
-            adapter_name, mac = preferred_adapter
-            primary_hint = f"[PISTA] Interfaz AirPlay seleccionada manualmente: {adapter_name} ({mac})."
-            return [(receiver_name, ["-m", mac, *runtime_args], primary_hint)]
-
-        # No preferred adapter: build plans for all active adapters to maximize
-        # discoverability. The first adapter keeps the base receiver name; others
-        # get a suffix so multiple instances don't collide and are visible.
-        plans: list[tuple[str, list[str], str | None]] = []
-        for idx, (adapter_name, mac) in enumerate(adapters):
-            instance_name = receiver_name if idx == 0 else f"{receiver_name} - {adapter_name}"
-            args = ["-m", mac, *runtime_args]
-            hint = f"[PISTA] Iniciando receptor en interfaz {adapter_name} ({mac})."
-            plans.append((instance_name, args, hint))
-
-        return plans
+        """Build minimal launch plan - single instance for maximum compatibility."""
+        # Use minimal configuration: just receiver name and args
+        # Don't launch multiple instances per interface - keep it simple
+        return [(receiver_name, runtime_args, None)]
 
     def _terminate_stale_uxplay_instances(self, uxplay_path: Path) -> int:
         if os.name != "nt":
