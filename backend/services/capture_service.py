@@ -111,7 +111,13 @@ class CaptureService:
         source_mode: str = "desktop",
         window_title: str = "UxPlay",
         fps: int = 30,
+        capture_region: tuple[int, int, int, int] | None = None,
     ) -> None:
+        # When ``capture_region`` is provided the caller is explicitly
+        # instructing the service to grab a fixed rectangle from the desktop
+        # rather than trying to resolve a window handle/title. This is
+        # particularly useful for capturing the embedded preview pane which
+        # isn't always easy to identify via the normal window lookup logic.
         with self._lock:
             if self._record_process is not None and self._record_process.poll() is None:
                 raise RuntimeError("Ya hay una grabacion en curso.")
@@ -124,11 +130,19 @@ class CaptureService:
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
             mode = source_mode.strip().lower()
-            candidate_sources = (
-                self._window_capture_sources(window_title)
-                if mode == "window"
-                else [self._build_capture_source(source_mode, window_title)]
-            )
+            # build candidate sources only if we don't already have an explicit
+            # region; explicit regions skip the title/handle resolution below.
+            candidate_sources = []
+            if capture_region is None:
+                candidate_sources = (
+                    self._window_capture_sources(window_title)
+                    if mode == "window"
+                    else [self._build_capture_source(source_mode, window_title)]
+                )
+            else:
+                # we will treat the desktop as the source and record the
+                # provided rectangle directly
+                candidate_sources = ["desktop"]
 
             process: subprocess.Popen[str] | None = None
             early_output = ""
@@ -138,51 +152,77 @@ class CaptureService:
             started = False
             tracking_session_id: int | None = None
 
-            for source_arg in candidate_sources:
-                source_for_ffmpeg = source_arg
-                capture_region: tuple[int, int, int, int] | None = None
-                if mode == "window":
-                    capture_region = self._resolve_window_region(source_arg)
-                    if capture_region is not None:
-                        source_for_ffmpeg = "desktop"
-                    elif source_arg.startswith("title="):
-                        candidate_title = source_arg.removeprefix("title=")
-                        if not self._window_title_exists(candidate_title):
+            # if an explicit region was supplied use it immediately, bypassing
+            # the loop below entirely
+            if capture_region is not None:
+                capture_region = tuple(capture_region)
+                command = self._build_record_command(
+                    ffmpeg_path,
+                    "desktop",
+                    output_path,
+                    fps,
+                    capture_region=capture_region,
+                )
+                process = self._spawn_record_process(
+                    command=command,
+                    ffmpeg_path=ffmpeg_path,
+                    env=env,
+                    creationflags=creationflags,
+                    startupinfo=startupinfo,
+                )
+                started = True
+                selected_region = capture_region
+                selected_source = "desktop"
+                if capture_region is not None:
+                    self._emit_log(
+                        f"[PISTA] Grabacion con region explicita {capture_region} (ancho x alto)."
+                    )
+            else:
+                for source_arg in candidate_sources:
+                    source_for_ffmpeg = source_arg
+                    capture_region: tuple[int, int, int, int] | None = None
+                    if mode == "window":
+                        capture_region = self._resolve_window_region(source_arg)
+                        if capture_region is not None:
+                            source_for_ffmpeg = "desktop"
+                        elif source_arg.startswith("title="):
+                            candidate_title = source_arg.removeprefix("title=")
+                            if not self._window_title_exists(candidate_title):
+                                continue
+
+                    max_attempts = 2 if mode == "window" else 1
+                    for attempt in range(1, max_attempts + 1):
+                        command = self._build_record_command(
+                            ffmpeg_path,
+                            source_for_ffmpeg,
+                            output_path,
+                            fps,
+                            capture_region=capture_region,
+                        )
+                        process = self._spawn_record_process(
+                            command=command,
+                            ffmpeg_path=ffmpeg_path,
+                            env=env,
+                            creationflags=creationflags,
+                            startupinfo=startupinfo,
+                        )
+                        exited_early, early_output, early_code = self._check_early_startup_failure(process)
+                        if not exited_early:
+                            selected_source = source_arg
+                            selected_region = capture_region
+                            started = True
+                            break
+                        if mode == "window" and self._is_window_not_found_error(early_output):
+                            break
+                        if self._is_retryable_startup_error(early_output) and attempt < max_attempts:
+                            self._emit_log("[PISTA] Inicio de grabacion inestable. Reintentando automaticamente...")
+                            time.sleep(0.35)
                             continue
 
-                max_attempts = 2 if mode == "window" else 1
-                for attempt in range(1, max_attempts + 1):
-                    command = self._build_record_command(
-                        ffmpeg_path,
-                        source_for_ffmpeg,
-                        output_path,
-                        fps,
-                        capture_region=capture_region,
-                    )
-                    process = self._spawn_record_process(
-                        command=command,
-                        ffmpeg_path=ffmpeg_path,
-                        env=env,
-                        creationflags=creationflags,
-                        startupinfo=startupinfo,
-                    )
-                    exited_early, early_output, early_code = self._check_early_startup_failure(process)
-                    if not exited_early:
-                        selected_source = source_arg
-                        selected_region = capture_region
-                        started = True
+                        details = self._summarize_early_failure(early_output, early_code)
+                        raise RuntimeError(f"La grabacion no pudo iniciar: {details}")
+                    if started:
                         break
-                    if mode == "window" and self._is_window_not_found_error(early_output):
-                        break
-                    if self._is_retryable_startup_error(early_output) and attempt < max_attempts:
-                        self._emit_log("[PISTA] Inicio de grabacion inestable. Reintentando automaticamente...")
-                        time.sleep(0.35)
-                        continue
-
-                    details = self._summarize_early_failure(early_output, early_code)
-                    raise RuntimeError(f"La grabacion no pudo iniciar: {details}")
-                if started:
-                    break
             if not started:
                 details = self._summarize_early_failure(early_output, early_code)
                 raise RuntimeError(f"La grabacion no pudo iniciar: {details}")

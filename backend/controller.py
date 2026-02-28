@@ -93,13 +93,25 @@ class AppController:
         source_mode: str = "desktop",
         window_title: str = "UxPlay",
         fps: int = 30,
+        *,
+        capture_region: tuple[int, int, int, int] | None = None,
     ) -> None:
+        """Begin a recording.
+
+        Parameters mirror those in :class:`CaptureService.start_recording`.
+        The new ``capture_region`` argument allows the caller to specify an
+        explicit screen rectangle (x, y, width, height) that should be recorded.
+        When given the controller will forward the value directly to the
+        capture service and the window-title lookup logic will be bypassed. This
+        is used by the UI to lock the recording to the embedded preview panel.
+        """
         self._capture_service.start_recording(
             uxplay_path=uxplay_path,
             output_path=output_path,
             source_mode=source_mode,
             window_title=window_title,
             fps=fps,
+            capture_region=capture_region,
         )
 
     def stop_recording(self, output_path: Path | None = None) -> None:

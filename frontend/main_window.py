@@ -39,6 +39,8 @@ class MainWindow:
     _BIND_TARGET_AUTO = "__auto__"
     _EMBED_RETRY_DELAY_MS = 450
     _EMBED_MAX_RETRIES = 24
+    _IPHONE_PREVIEW_ASPECT_WIDTH = 9
+    _IPHONE_PREVIEW_ASPECT_HEIGHT = 16
 
     def __init__(
         self,
@@ -1171,18 +1173,31 @@ class MainWindow:
         self._record_suggested_name = f"grabacion_{started_at.strftime('%Y%m%d_%H%M%S')}.mp4"
         self._record_stop_requested = False
         temp_path = Path(tempfile.gettempdir()) / f"ScreenMirrorIOSAndroid_{started_at.strftime('%Y%m%d_%H%M%S_%f')}.mp4"
+
         capture_window_source = self._capture_title_var.get().strip()
+        capture_region: tuple[int, int, int, int] | None = None
         if os.name == "nt" and self._embedded_window_hwnd is not None:
-            capture_window_source = f"hwnd=0x{self._embedded_window_hwnd:X}"
+            # prefer recording the precise area of the embedded preview pane
+            # rather than trying to match the uxplay window title/handle.  This
+            # guarantees a 9:16 region and avoids accidental desktop captures
+            # when the uxplay window is not found or has moved.
+            capture_region = (
+                self._preview_host_frame.winfo_rootx(),
+                self._preview_host_frame.winfo_rooty(),
+                self._preview_host_frame.winfo_width(),
+                self._preview_host_frame.winfo_height(),
+            )
             self._append_log("[PISTA] Grabacion enfocada al panel integrado de previsualizacion.")
 
         def start_recording() -> None:
+            # if we computed an explicit region, ask the controller to use it
             self._controller.start_recording(
                 uxplay_path=Path(self._uxplay_path_var.get().strip()),
                 output_path=temp_path,
-                source_mode="window",
+                source_mode="desktop" if capture_region is not None else "window",
                 window_title=capture_window_source,
                 fps=int(self._capture_fps_var.get()),
+                capture_region=capture_region,
             )
 
         self._run_in_background(
