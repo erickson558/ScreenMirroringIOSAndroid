@@ -108,6 +108,9 @@ class MainWindow:
         self._animation_after_id: str | None = None
         self._animation_phase = 0.0
         self._intro_alpha = 1.0
+        # region tracking state for explicit preview capture
+        self._current_capture_region: tuple[int, int, int, int] | None = None
+        self._last_capture_region: tuple[int, int, int, int] | None = None
         self._busy_count = 0
         self._closing = False
         self._about_dialog: tk.Toplevel | None = None
@@ -1188,6 +1191,25 @@ class MainWindow:
                 self._preview_host_frame.winfo_height(),
             )
             self._append_log("[PISTA] Grabacion enfocada al panel integrado de previsualizacion.")
+            # start tracking in UI so we can notify controller if the panel moves
+            self._current_capture_region = capture_region
+            self._last_capture_region = capture_region
+
+        def start_recording() -> None:
+            # if we computed an explicit region, ask the controller to use it
+            self._controller.start_recording(
+                uxplay_path=Path(self._uxplay_path_var.get().strip()),
+                output_path=temp_path,
+                source_mode="desktop" if capture_region is not None else "window",
+                window_title=capture_window_source,
+                fps=int(self._capture_fps_var.get()),
+                capture_region=capture_region,
+            )
+
+        # after the call above returns the recording is running; begin polling
+        # for region changes if we are using an explicit capture area
+        if capture_region is not None:
+            self._root.after(500, self._maybe_update_capture_region)
 
         def start_recording() -> None:
             # if we computed an explicit region, ask the controller to use it
@@ -1313,6 +1335,28 @@ class MainWindow:
 
     def _on_preview_host_resized(self, _event: tk.Event[tk.Misc]) -> None:
         self._resize_embedded_window()
+        # also treat resizing as a potential change in capture region
+        if self._current_capture_region is not None:
+            self._root.after(10, self._maybe_update_capture_region)
+
+    def _maybe_update_capture_region(self) -> None:
+        """Check whether the preview panel has moved/changed and notify backend."""
+        if self._current_capture_region is None:
+            return
+        # compute current coordinates
+        new_region = (
+            self._preview_host_frame.winfo_rootx(),
+            self._preview_host_frame.winfo_rooty(),
+            self._preview_host_frame.winfo_width(),
+            self._preview_host_frame.winfo_height(),
+        )
+        if new_region != self._last_capture_region:
+            self._last_capture_region = new_region
+            self._current_capture_region = new_region
+            self._controller.update_recording_region(new_region)
+        # schedule another check if still recording with explicit region
+        if self._controller.is_recording() and self._current_capture_region is not None:
+            self._root.after(300, self._maybe_update_capture_region)
 
     def _schedule_embed_window(self, announce_log: str | None = None) -> None:
         if os.name != "nt":

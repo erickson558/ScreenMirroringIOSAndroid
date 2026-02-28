@@ -288,6 +288,23 @@ class CaptureService:
             )
             self._record_tracking_thread.start()
 
+    def update_recording_region(self, new_region: tuple[int, int, int, int]) -> None:
+        """Adjust the capture to follow an externally supplied region.
+
+        This is similar to the automatic window-tracking logic but driven by the
+        frontend (which observes the embedded preview frame).  The method starts
+        a rotation segment in a background thread so the call returns quickly.
+        """
+        with self._lock:
+            if self._record_process is None or self._record_process.poll() is not None:
+                return
+            session_id = self._record_session_id
+        threading.Thread(
+            target=self._rotate_recording_segment,
+            args=(session_id, tuple(new_region)),
+            daemon=True,
+        ).start()
+
     def stop_recording(self, output_path: Path | None = None) -> None:
         process: subprocess.Popen[str] | None
         recorded_output_path: Path | None
