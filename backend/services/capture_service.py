@@ -521,7 +521,67 @@ class CaptureService:
             seen_sources.add(title_source)
             sources.append(title_source)
 
+        # If no candidate hwnds/titles found, try to locate a top-level window
+        # belonging to the UxPlay process (fallback for cases where the video
+        # renderer does not set a predictable window title).
+        if not sources:
+            hwnd = self._find_window_handle_by_process_substring("uxplay")
+            if hwnd is not None:
+                for hwnd_source in (f"hwnd=0x{hwnd:X}", f"hwnd={hwnd}"):
+                    if hwnd_source in seen_sources:
+                        continue
+                    seen_sources.add(hwnd_source)
+                    sources.append(hwnd_source)
+
         return sources
+
+    def _find_window_handle_by_process_substring(self, substring: str) -> int | None:
+        """
+        Enumerate top-level visible windows and return the hwnd of the first
+        window whose process image path contains `substring` (case-insensitive).
+        """
+        if os.name != "nt":
+            return None
+
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+
+        EnumWindows = user32.EnumWindows
+        EnumWindowsProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        GetWindowThreadProcessId = user32.GetWindowThreadProcessId
+
+        result_hwnds: list[int] = []
+
+        @EnumWindowsProc
+        def _cb(hwnd, lparam):
+            try:
+                if not user32.IsWindowVisible(hwnd):
+                    return True
+                pid = wintypes.DWORD()
+                GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                process_handle = kernel32.OpenProcess(0x1000, False, pid.value)  # PROCESS_QUERY_LIMITED_INFORMATION
+                if not process_handle:
+                    return True
+                try:
+                    buf = ctypes.create_unicode_buffer(1024)
+                    size = wintypes.DWORD(ctypes.sizeof(buf))
+                    # QueryFullProcessImageNameW returns non-zero on success
+                    qfn = kernel32.QueryFullProcessImageNameW
+                    if qfn(process_handle, 0, buf, ctypes.byref(size)):
+                        path = buf.value or ""
+                        if substring.casefold() in path.casefold():
+                            result_hwnds.append(hwnd)
+                            return False
+                finally:
+                    kernel32.CloseHandle(process_handle)
+            except Exception:
+                pass
+            return True
+
+        EnumWindows(_cb, 0)
+        if result_hwnds:
+            return int(result_hwnds[0])
+        return None
 
     def _build_capture_env(self, ffmpeg_path: Path) -> dict[str, str]:
         env = os.environ.copy()
