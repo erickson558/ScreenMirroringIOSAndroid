@@ -108,9 +108,6 @@ class MainWindow:
         self._animation_after_id: str | None = None
         self._animation_phase = 0.0
         self._intro_alpha = 1.0
-        # region tracking state for explicit preview capture
-        self._current_capture_region: tuple[int, int, int, int] | None = None
-        self._last_capture_region: tuple[int, int, int, int] | None = None
         self._busy_count = 0
         self._closing = False
         self._about_dialog: tk.Toplevel | None = None
@@ -121,7 +118,6 @@ class MainWindow:
         self._embed_retry_after_id: str | None = None
         self._embed_retry_left = 0
         self._embedded_window_hwnd: int | None = None
-        self._embedded_original_parent: int | None = None
         self._embedded_original_style: int | None = None
 
         self._build_ui()
@@ -1178,38 +1174,18 @@ class MainWindow:
         temp_path = Path(tempfile.gettempdir()) / f"ScreenMirrorIOSAndroid_{started_at.strftime('%Y%m%d_%H%M%S_%f')}.mp4"
 
         capture_window_source = self._capture_title_var.get().strip()
-        capture_region: tuple[int, int, int, int] | None = None
         if os.name == "nt" and self._embedded_window_hwnd is not None:
-            # prefer recording the precise area of the embedded preview pane
-            # rather than trying to match the uxplay window title/handle.  This
-            # guarantees a 9:16 region and avoids accidental desktop captures
-            # when the uxplay window is not found or has moved.
-            capture_region = (
-                self._preview_host_frame.winfo_rootx(),
-                self._preview_host_frame.winfo_rooty(),
-                self._preview_host_frame.winfo_width(),
-                self._preview_host_frame.winfo_height(),
-            )
+            capture_window_source = f"hwnd=0x{self._embedded_window_hwnd:X}"
             self._append_log("[PISTA] Grabacion enfocada al panel integrado de previsualizacion.")
-            # start tracking in UI so we can notify controller if the panel moves
-            self._current_capture_region = capture_region
-            self._last_capture_region = capture_region
 
         def start_recording() -> None:
-            # if we computed an explicit region, ask the controller to use it
             self._controller.start_recording(
                 uxplay_path=Path(self._uxplay_path_var.get().strip()),
                 output_path=temp_path,
-                source_mode="desktop" if capture_region is not None else "window",
+                source_mode="window",
                 window_title=capture_window_source,
                 fps=int(self._capture_fps_var.get()),
-                capture_region=capture_region,
             )
-
-        # after the call above returns the recording is running; begin polling
-        # for region changes if we are using an explicit capture area
-        if capture_region is not None:
-            self._root.after(500, self._maybe_update_capture_region)
 
         def start_recording() -> None:
             # if we computed an explicit region, ask the controller to use it
@@ -1335,28 +1311,9 @@ class MainWindow:
 
     def _on_preview_host_resized(self, _event: tk.Event[tk.Misc]) -> None:
         self._resize_embedded_window()
-        # also treat resizing as a potential change in capture region
-        if self._current_capture_region is not None:
-            self._root.after(10, self._maybe_update_capture_region)
+        # nothing special to do when resizing; overlay window is repositioned elsewhere
 
-    def _maybe_update_capture_region(self) -> None:
-        """Check whether the preview panel has moved/changed and notify backend."""
-        if self._current_capture_region is None:
-            return
-        # compute current coordinates
-        new_region = (
-            self._preview_host_frame.winfo_rootx(),
-            self._preview_host_frame.winfo_rooty(),
-            self._preview_host_frame.winfo_width(),
-            self._preview_host_frame.winfo_height(),
-        )
-        if new_region != self._last_capture_region:
-            self._last_capture_region = new_region
-            self._current_capture_region = new_region
-            self._controller.update_recording_region(new_region)
-        # schedule another check if still recording with explicit region
-        if self._controller.is_recording() and self._current_capture_region is not None:
-            self._root.after(300, self._maybe_update_capture_region)
+    # previous region-tracking facility removed; recording now locks to window handle
 
     def _schedule_embed_window(self, announce_log: str | None = None) -> None:
         if os.name != "nt":
@@ -1468,6 +1425,11 @@ class MainWindow:
         return candidates[0][1]
 
     def _embed_window_into_preview(self, hwnd: int) -> bool:
+        # Overlay the uxplay video window on top of our preview frame instead
+        # of reparenting it.  Keeping it top-level ensures that ffmpeg's
+        # gdigrab input can still capture the window contents (child windows are
+        # ignored).  We simply remove decorations and move the window to match
+        # the frame's screen coordinates.
         if os.name != "nt":
             return False
         if hwnd <= 0:
@@ -1481,15 +1443,11 @@ class MainWindow:
         if not user32.IsWindow(hwnd):
             return False
 
-        host_hwnd = int(self._preview_host_frame.winfo_id())
-        if host_hwnd <= 0:
-            return False
-
+        # if a different preview window was already attached, restore it first
         if self._embedded_window_hwnd is not None and self._embedded_window_hwnd != hwnd:
             self._release_embedded_window()
 
         GWL_STYLE = -16
-        WS_CHILD = 0x40000000
         WS_VISIBLE = 0x10000000
         WS_CAPTION = 0x00C00000
         WS_THICKFRAME = 0x00040000
@@ -1498,26 +1456,18 @@ class MainWindow:
         WS_SYSMENU = 0x00080000
         WS_POPUP = 0x80000000
 
-        original_parent = int(user32.GetParent(hwnd))
+        # record original style so we can restore later
         original_style = int(user32.GetWindowLongW(hwnd, GWL_STYLE))
-        new_style = original_style
-        new_style &= ~(
-            WS_CAPTION
-            | WS_THICKFRAME
-            | WS_MINIMIZEBOX
-            | WS_MAXIMIZEBOX
-            | WS_SYSMENU
-            | WS_POPUP
-        )
-        new_style |= WS_CHILD | WS_VISIBLE
 
-        user32.SetParent(hwnd, host_hwnd)
+        # create a borderless popup style
+        new_style = original_style
+        new_style &= ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU)
+        new_style |= WS_POPUP | WS_VISIBLE
+
         user32.SetWindowLongW(hwnd, GWL_STYLE, new_style)
-        user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0027)  # SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_FRAMECHANGED
         user32.ShowWindow(hwnd, 5)  # SW_SHOW
 
         self._embedded_window_hwnd = hwnd
-        self._embedded_original_parent = original_parent
         self._embedded_original_style = original_style
         self._preview_overlay.place_forget()
         self._set_preview_hint(self._tr("preview_hint_embedded"))
@@ -1526,6 +1476,9 @@ class MainWindow:
         return True
 
     def _resize_embedded_window(self) -> None:
+        # reposition/resize the overlay window to exactly cover the preview
+        # host frame.  This runs frequently during animations and when the main
+        # window moves.
         if os.name != "nt":
             return
         hwnd = self._embedded_window_hwnd
@@ -1543,9 +1496,14 @@ class MainWindow:
             self._set_preview_hint(self._tr("preview_hint_wait_stream"))
             return
 
+        # compute absolute screen coordinates of the preview frame
+        x = self._preview_host_frame.winfo_rootx()
+        y = self._preview_host_frame.winfo_rooty()
         width = max(64, int(self._preview_host_frame.winfo_width()))
         height = max(64, int(self._preview_host_frame.winfo_height()))
-        user32.MoveWindow(hwnd, 0, 0, width, height, True)
+        SWP_NOZORDER = 0x0004
+        SWP_NOACTIVATE = 0x0010
+        user32.SetWindowPos(hwnd, 0, x, y, width, height, SWP_NOZORDER | SWP_NOACTIVATE)
 
     def _release_embedded_window(self) -> None:
         if self._embed_retry_after_id is not None:
@@ -1560,11 +1518,8 @@ class MainWindow:
             try:
                 user32 = ctypes.windll.user32
                 if user32.IsWindow(hwnd):
+                    # restore original style so the video window behaves normally
                     GWL_STYLE = -16
-                    if self._embedded_original_parent is not None:
-                        user32.SetParent(hwnd, self._embedded_original_parent)
-                    else:
-                        user32.SetParent(hwnd, 0)
                     if self._embedded_original_style is not None:
                         user32.SetWindowLongW(hwnd, GWL_STYLE, int(self._embedded_original_style))
                         user32.SetWindowPos(
@@ -1576,11 +1531,16 @@ class MainWindow:
                             0,
                             0x0027,  # SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_FRAMECHANGED
                         )
+                    # move it offscreen so it doesn't interfere visually
+                    user32.SetWindowPos(hwnd, 0, -10000, -10000, 0, 0, 0x0001)
+            except Exception:
+                pass
+        self._preview_overlay.place(relx=0.5, rely=0.5, anchor="center")
+        self._set_preview_hint(self._tr("preview_hint_wait_stream"))
                     user32.ShowWindow(hwnd, 5)  # SW_SHOW
             except (AttributeError, OSError):
                 pass
 
-        self._embedded_original_parent = None
         self._embedded_original_style = None
         self._preview_overlay.place(relx=0.5, rely=0.5, anchor="center")
 

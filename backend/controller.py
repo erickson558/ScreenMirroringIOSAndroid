@@ -120,14 +120,6 @@ class AppController:
     def is_recording(self) -> bool:
         return self._capture_service.is_recording
 
-    def update_recording_region(self, region: tuple[int, int, int, int]) -> None:
-        """Request that the active recording switch to a new capture region.
-
-        The region tuple is (x, y, width, height) in screen coordinates.  This is
-        used by the frontend when the embedded preview moves so the capture can
-        follow it.  If no recording is active the call is ignored.
-        """
-        self._capture_service.update_recording_region(region)
 
     def drain_events(self) -> list[AppEvent]:
         events: list[AppEvent] = []
