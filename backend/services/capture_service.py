@@ -215,11 +215,15 @@ class CaptureService:
             self._record_session_id += 1
 
             if mode == "window" and selected_region is not None:
-                if selected_source.startswith("title="):
+                if selected_source.startswith("title=") or selected_source.startswith("hwnd="):
                     tracking_source = selected_source
                 else:
-                    title = " ".join(window_title.split()).strip() or "Direct3D11 renderer"
-                    tracking_source = f"title={title}"
+                    normalized_window_source = " ".join(window_title.split()).strip() or "Direct3D11 renderer"
+                    low_source = normalized_window_source.lower()
+                    if low_source.startswith("title=") or low_source.startswith("hwnd="):
+                        tracking_source = normalized_window_source
+                    else:
+                        tracking_source = f"title={normalized_window_source}"
                 self._record_tracking_source = tracking_source
                 self._record_tracking_region = selected_region
                 self._record_tracking_size = (selected_region[2], selected_region[3])
