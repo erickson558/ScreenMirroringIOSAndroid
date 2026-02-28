@@ -1537,12 +1537,6 @@ class MainWindow:
                 pass
         self._preview_overlay.place(relx=0.5, rely=0.5, anchor="center")
         self._set_preview_hint(self._tr("preview_hint_wait_stream"))
-                    user32.ShowWindow(hwnd, 5)  # SW_SHOW
-            except (AttributeError, OSError):
-                pass
-
-        self._embedded_original_style = None
-        self._preview_overlay.place(relx=0.5, rely=0.5, anchor="center")
 
     def _set_preview_hint(self, message: str) -> None:
         self._preview_hint_var.set(message)
