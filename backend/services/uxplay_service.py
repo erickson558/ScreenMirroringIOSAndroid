@@ -421,9 +421,11 @@ class UxPlayService:
         lowered = {arg.lower() for arg in runtime_args}
         if "-nc" in lowered:
             return runtime_args, None
+        # Add both -nc (keep window) and -async (non-blocking window creation)
+        new_args = [*runtime_args, "-nc", "-async"]
         return (
-            [*runtime_args, "-nc"],
-            "[PISTA] Se activo '-nc' para mantener la ventana abierta entre reconexiones AirPlay.",
+            new_args,
+            "[PISTA] Se activo '-nc -async' para que la ventana aparezca inmediatamente sin bloqueos.",
         )
 
     def _has_explicit_window_size_arg(self, runtime_args: list[str]) -> bool:
