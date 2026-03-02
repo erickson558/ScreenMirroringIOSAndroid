@@ -1364,11 +1364,25 @@ class UxPlayService:
         if os.name != "nt":
             return
 
+        firewall_profile = self._query_current_firewall_profile_text()
+        low_fw = self._normalize_for_match(firewall_profile)
+        has_gpo_locked_rules = "localfirewallrules" in low_fw and "n/a" in low_fw
+        if has_gpo_locked_rules:
+            self._emit_log(
+                "[ERROR] No se pueden crear reglas locales de firewall: controladas por politica corporativa (GPO)."
+            )
+            self._emit_log(
+                "[PISTA] Solicita a TI agregar excepciones en GPO para Bonjour/mDNS (UDP 5353) "
+                "y AirPlay (UDP 6000,6001,7011; TCP 7000,7001,7100)."
+            )
+            return
+
         rule_name = "UxPlay AirPlay"
         exe_path = str(uxplay_executable)
-        try:
-            # run netsh to add rule; if it exists nothing changes
-            subprocess.run(
+
+        rules: list[tuple[str, list[str]]] = [
+            (
+                rule_name,
                 [
                     "netsh",
                     "advfirewall",
@@ -1379,16 +1393,12 @@ class UxPlayService:
                     "dir=in",
                     "action=allow",
                     f"program={exe_path}",
+                    "profile=private",
                     "enable=yes",
                 ],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=8,
-            )
-            self._emit_log(f"[PISTA] Regla de firewall intentada para {rule_name}.")
-            # allow mDNS replies (UDP 5353) since many VPNs/firewalls block it
-            subprocess.run(
+            ),
+            (
+                "UxPlay mDNS",
                 [
                     "netsh",
                     "advfirewall",
@@ -1400,14 +1410,61 @@ class UxPlayService:
                     "action=allow",
                     "protocol=UDP",
                     "localport=5353",
+                    "profile=private",
                     "enable=yes",
                 ],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=8,
-            )
-            self._emit_log("[PISTA] Regla de firewall intentada para mDNS (UDP 5353).")
+            ),
+            (
+                "UxPlay AirPlay UDP",
+                [
+                    "netsh",
+                    "advfirewall",
+                    "firewall",
+                    "add",
+                    "rule",
+                    "name=UxPlay AirPlay UDP",
+                    "dir=in",
+                    "action=allow",
+                    "protocol=UDP",
+                    "localport=6000,6001,7011",
+                    "profile=private",
+                    "enable=yes",
+                ],
+            ),
+            (
+                "UxPlay AirPlay TCP",
+                [
+                    "netsh",
+                    "advfirewall",
+                    "firewall",
+                    "add",
+                    "rule",
+                    "name=UxPlay AirPlay TCP",
+                    "dir=in",
+                    "action=allow",
+                    "protocol=TCP",
+                    "localport=7000,7001,7100",
+                    "profile=private",
+                    "enable=yes",
+                ],
+            ),
+        ]
+
+        try:
+            for label, command in rules:
+                result = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=8,
+                )
+                std_err = (result.stderr or "").strip()
+                if result.returncode == 0:
+                    self._emit_log(f"[PISTA] Regla de firewall aplicada: {label}.")
+                else:
+                    detail = std_err or f"codigo {result.returncode}"
+                    self._emit_log(f"[ADVERTENCIA] No se pudo aplicar regla de firewall '{label}': {detail}")
         except Exception as exc:  # noqa: BLE001
             self._emit_log(f"[ADVERTENCIA] no se pudo crear regla de firewall: {exc}")
 
