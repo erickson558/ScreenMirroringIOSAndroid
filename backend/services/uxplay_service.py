@@ -341,6 +341,9 @@ class UxPlayService:
             for iface_name, mac in adapters:
                 if "vpn" not in iface_name.lower():
                     hint = f"[PISTA] Enlazando receptor a interfaz {iface_name} (MAC {mac}) por defecto."
+                    # if VPN active, add warning that mDNS may still be blocked
+                    if self._is_windows_vpn_active():
+                        hint += " [ADVERTENCIA] VPN activa detectada; puede bloquear mDNS."
                     return [plan(f"{receiver_name} [{iface_name}]", runtime_args + ["-m", mac], hint)]
             # fallback to first adapter if all look like VPN interfaces
             iface_name, mac = adapters[0]
@@ -1203,6 +1206,27 @@ class UxPlayService:
                 timeout=8,
             )
             self._emit_log(f"[PISTA] Regla de firewall intentada para {rule_name}.")
+            # allow mDNS replies (UDP 5353) since many VPNs/firewalls block it
+            subprocess.run(
+                [
+                    "netsh",
+                    "advfirewall",
+                    "firewall",
+                    "add",
+                    "rule",
+                    "name=UxPlay mDNS",
+                    "dir=in",
+                    "action=allow",
+                    "protocol=UDP",
+                    "localport=5353",
+                    "enable=yes",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=8,
+            )
+            self._emit_log("[PISTA] Regla de firewall intentada para mDNS (UDP 5353).")
         except Exception as exc:  # noqa: BLE001
             self._emit_log(f"[ADVERTENCIA] no se pudo crear regla de firewall: {exc}")
 
