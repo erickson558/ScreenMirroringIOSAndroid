@@ -1082,6 +1082,14 @@ class UxPlayService:
                 "[ADVERTENCIA] Reglas locales de firewall deshabilitadas por politica (GPO). Requiere ajuste de TI/red."
             )
 
+        # Check Bonjour service
+        if not self._check_bonjour_service():
+            hints.append(
+                "[ADVERTENCIA] Servicio Bonjour no esta instalado o corriendo. Sin Bonjour, "
+                "el iPhone no puede descubrir el receptor. Instala Bonjour desde Apple: "
+                "https://support.apple.com/downloads/bonjour"
+            )
+
         return hints
 
     def get_network_diagnostics(self) -> list[str]:
@@ -1090,7 +1098,36 @@ class UxPlayService:
         Returns a list of human-readable hints and warnings useful for
         diagnosing why AirPlay discovery may fail on the current host.
         """
-        return self._diagnose_windows_discovery_risks()
+        hints = self._diagnose_windows_discovery_risks()
+        # Check Bonjour service availability
+        if not self._check_bonjour_service():
+            hints.append(
+                "[ADVERTENCIA] Servicio Bonjour no esta instalado o corriendo. Sin Bonjour, "
+                "el iPhone no puede descubrir el receptor. Instala Bonjour desde Apple: "
+                "https://support.apple.com/downloads/bonjour"
+            )
+        return hints
+
+    def _check_bonjour_service(self) -> bool:
+        """Check if Bonjour/mDNS service is available on Windows."""
+        if os.name != "nt":
+            return True  # Assume mDNS available on non-Windows
+
+        try:
+            output = subprocess.run(
+                ["sc", "query", "Bonjour Service"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+                stdin=subprocess.DEVNULL,
+                creationflags=self._creationflags(),
+                startupinfo=self._startupinfo(),
+            )
+            # Check if service is running
+            return "RUNNING" in (output.stdout or "").upper()
+        except Exception:  # noqa: BLE001
+            return False
 
     def _is_windows_vpn_active(self) -> bool:
         if os.name != "nt":
