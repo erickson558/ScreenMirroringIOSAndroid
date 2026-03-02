@@ -1274,11 +1274,19 @@ class MainWindow:
                 self._append_log("[ERROR] Region de captura invalida (demasiado pequena)")
                 return
 
+        # Use window tracking mode when we have a valid window handle/source;
+        # this enables automatic window motion tracking during recording so
+        # the capture follows the window if user moves it.
+        use_window_tracking = (
+            capture_window_source.startswith("hwnd=") or
+            capture_window_source.startswith("title=")
+        )
+
         def start_recording() -> None:
             self._controller.start_recording(
                 uxplay_path=Path(self._uxplay_path_var.get().strip()),
                 output_path=temp_path,
-                source_mode="desktop" if capture_region is not None else "window",
+                source_mode="window" if use_window_tracking else "desktop",
                 window_title=capture_window_source,
                 fps=int(self._capture_fps_var.get()),
                 capture_region=capture_region,
