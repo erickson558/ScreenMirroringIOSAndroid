@@ -103,12 +103,26 @@ class UxPlayService:
             if not append_hostname_suffix:
                 runtime_args = ["-nh", *runtime_args]
             preferred_alias = self._normalize_interface_alias(preferred_interface_alias)
-            
-            # Simplified: just use legacy ports and minimal args
-            # Don't add window/persistence/size args - let UxPlay handle it natively
-            if "-p" not in [arg.lower() for arg in runtime_args]:
-                runtime_args = ["-p", *runtime_args]
-            
+
+            # Ensure compatibility flags by default: legacy ports, keep window
+            # visible and non-blocking, default window size and Windows D3D11
+            # renderer where applicable. Helpers return (args, hint).
+            runtime_args, hint = self._ensure_legacy_ports(runtime_args)
+            if hint:
+                startup_hints.append(hint)
+
+            runtime_args, hint = self._ensure_window_persistence(runtime_args)
+            if hint:
+                startup_hints.append(hint)
+
+            runtime_args, hint = self._ensure_window_size(runtime_args)
+            if hint:
+                startup_hints.append(hint)
+
+            runtime_args, hint = self._ensure_windows_d3d11_renderer(runtime_args)
+            if hint:
+                startup_hints.append(hint)
+
             launch_plans = self._build_launch_plans(receiver_name, runtime_args, preferred_alias)
             self._last_start_request = _StartRequest(
                 uxplay_path=normalized_path,
@@ -129,6 +143,9 @@ class UxPlayService:
             try:
                 for instance_name, instance_args, instance_hint in launch_plans:
                     command = [str(normalized_path), "-n", instance_name, *instance_args]
+                    # record command for diagnostics
+                    command_line = " ".join(command)
+                    command_logs.append(command_line)
                     process = subprocess.Popen(
                         command,
                         stdout=subprocess.PIPE,
@@ -181,6 +198,8 @@ class UxPlayService:
             self._emit_log("[PISTA] Receptor reiniciado automaticamente para recuperar el primer enlace AirPlay.")
         for hint in self._diagnose_windows_discovery_risks():
             self._emit_log(hint)
+        # try to help the user by adding a firewall rule for the uxplay executable
+        self._ensure_firewall_rule(normalized_path)
         self._emit_state(True)
 
         for process, label in launched:
@@ -1116,6 +1135,42 @@ class UxPlayService:
 
     def _creationflags(self) -> int:
         return subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
+    def _ensure_firewall_rule(self, uxplay_executable: Path) -> None:
+        """Attempt to add a Windows firewall rule allowing inbound connections to UxPlay.
+
+        This helps users who have a restrictive profile (BlockInbound) or GPO.
+        If the rule already exists the command will quietly return; if we lack
+        privileges we emit a warning.
+        """
+        if os.name != "nt":
+            return
+
+        rule_name = "UxPlay AirPlay"
+        exe_path = str(uxplay_executable)
+        try:
+            # run netsh to add rule; if it exists nothing changes
+            subprocess.run(
+                [
+                    "netsh",
+                    "advfirewall",
+                    "firewall",
+                    "add",
+                    "rule",
+                    f"name={rule_name}",
+                    "dir=in",
+                    "action=allow",
+                    f"program={exe_path}",
+                    "enable=yes",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=8,
+            )
+            self._emit_log(f"[PISTA] Regla de firewall intentada para {rule_name}.")
+        except Exception as exc:  # noqa: BLE001
+            self._emit_log(f"[ADVERTENCIA] no se pudo crear regla de firewall: {exc}")
 
     def _startupinfo(self) -> subprocess.STARTUPINFO | None:
         if os.name != "nt":
