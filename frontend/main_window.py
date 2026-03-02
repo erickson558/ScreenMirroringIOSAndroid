@@ -828,11 +828,11 @@ class MainWindow:
         try:
             diagnostics = self._controller.get_network_discovery_diagnostics()
         except Exception as exc:  # pragma: no cover - defensive
-            self._append_log(f"[ERROR] Error al ejecutar diagnóstico de red: {exc}")
+            self._append_log(self._tr("error_diagnose_network_failed", error=str(exc)))
             return
 
         if not diagnostics:
-            self._append_log("[PISTA] Diagnóstico: no se detectaron problemas de descubrimiento de red.")
+            self._append_log(self._tr("success_diagnose_network_none"))
             return
 
         for line in diagnostics:

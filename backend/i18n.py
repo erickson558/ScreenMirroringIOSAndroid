@@ -153,6 +153,9 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "warn_save_config_failed": "[ADVERTENCIA] No se pudo guardar config.json: {error}",
         "status_save_config_failed": "No se pudo guardar config.json: {error}",
         "lang_changed_log": "[PISTA] Idioma cambiado a {language_label}.",
+        "btn_diagnose_network": "Diagnosticar red",
+        "success_diagnose_network_none": "[PISTA] Diagnóstico: no se detectaron problemas de descubrimiento de red.",
+        "error_diagnose_network_failed": "[ERROR] Error al ejecutar diagnóstico de red: {error}",
     },
     LANGUAGE_EN: {
         "window_title": "{app_name} - Studio Neon",
@@ -295,6 +298,9 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "warn_save_config_failed": "[WARNING] Could not save config.json: {error}",
         "status_save_config_failed": "Could not save config.json: {error}",
         "lang_changed_log": "[HINT] Language changed to {language_label}.",
+        "btn_diagnose_network": "Diagnose network",
+        "success_diagnose_network_none": "[HINT] Diagnostics: no network discovery issues detected.",
+        "error_diagnose_network_failed": "[ERROR] Error running network diagnostics: {error}",
     },
 }
 
