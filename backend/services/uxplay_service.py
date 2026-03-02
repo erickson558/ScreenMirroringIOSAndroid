@@ -1082,13 +1082,25 @@ class UxPlayService:
 
         firewall_profile = self._query_current_firewall_profile_text()
         low_fw = self._normalize_for_match(firewall_profile)
-        if "blockinbound,allowoutbound" in low_fw:
+        has_block_inbound = "blockinbound,allowoutbound" in low_fw
+        has_gpo_locked_rules = "localfirewallrules" in low_fw and "n/a" in low_fw
+
+        if has_block_inbound:
             hints.append(
                 "[ADVERTENCIA] El perfil de firewall activo tiene 'BlockInbound'. Puede impedir conexion AirPlay."
             )
-        if "localfirewallrules" in low_fw and "n/a" in low_fw:
+        if has_gpo_locked_rules:
             hints.append(
                 "[ADVERTENCIA] Reglas locales de firewall deshabilitadas por politica (GPO). Requiere ajuste de TI/red."
+            )
+        if has_block_inbound and has_gpo_locked_rules:
+            hints.append(
+                "[ERROR] Descubrimiento AirPlay bloqueado por politica corporativa (GPO): "
+                "firewall en BlockInbound sin reglas locales habilitadas."
+            )
+            hints.append(
+                "[PISTA] Solicita a TI habilitar excepcion en GPO para Bonjour/mDNS (UDP 5353) "
+                "y AirPlay (UDP 6000,6001,7011; TCP 7000,7001,7100) en perfil Privado."
             )
 
         # Check Bonjour service
