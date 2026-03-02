@@ -139,8 +139,8 @@ class UxPlayService:
                 self._scheduled_recovery_id = None
 
             creationflags = self._creationflags()
-            # Keep UxPlay video window visible while still suppressing console popups.
-            startupinfo = None
+            # Suppress console popups AND keep UxPlay window hidden until client connects
+            startupinfo = self._startupinfo()
             environment = self._build_runtime_env(normalized_path)
 
             try:
