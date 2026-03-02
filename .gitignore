@@ -13,6 +13,8 @@ env/
 build/
 dist/
 *.spec
+# Exception: include the main spec file needed for CI/CD
+!ScreenMirrorIOSAndroid.spec
 
 # Local runtime/config/output
 config.json
