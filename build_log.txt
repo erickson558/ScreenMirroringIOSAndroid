@@ -1,0 +1,75 @@
+Use 'Show-Help' to display help
+Embedding 'tools/uxplay' recursively (1132 files) into onefile executable...
+Building ScreenMirrorIOSAndroid.exe in current folder...
+Version actual: 0.0.71
+640 INFO: PyInstaller: 6.19.0, contrib hooks: 2026.1
+641 INFO: Python: 3.12.9
+908 INFO: Platform: Windows-11-10.0.26200-SP0
+908 INFO: Python environment: C:\Users\erickson\AppData\Local\Programs\Python\Python312
+911 INFO: wrote .\ScreenMirrorIOSAndroid.spec
+930 INFO: Removing temporary files and cleaning cache in C:\Users\erickson\AppData\Local\pyinstaller
+935 INFO: Module search paths (PYTHONPATH):
+['D:\\OneDrive\\Regional\\1 pendientes para '
+ 'analisis\\proyectospython\\LonelyScreenIOS',
+ 'C:\\Users\\erickson\\AppData\\Local\\Programs\\Python\\Python312\\python312.zip',
+ 'C:\\Users\\erickson\\AppData\\Local\\Programs\\Python\\Python312\\DLLs',
+ 'C:\\Users\\erickson\\AppData\\Local\\Programs\\Python\\Python312\\Lib',
+ 'C:\\Users\\erickson\\AppData\\Local\\Programs\\Python\\Python312',
+ 'C:\\Users\\erickson\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages',
+ 'D:\\OneDrive\\Regional\\1 pendientes para '
+ 'analisis\\proyectospython\\LonelyScreenIOS']
+2788 INFO: Appending 'datas' from .spec
+4511 INFO: checking Analysis
+4512 INFO: Building Analysis because Analysis-00.toc is non existent
+4512 INFO: Looking for Python shared library...
+4513 INFO: Using Python shared library: C:\Users\erickson\AppData\Local\Programs\Python\Python312\python312.dll
+4513 INFO: Running Analysis Analysis-00.toc
+4513 INFO: Target bytecode optimization level: 0
+4513 INFO: Initializing module dependency graph...
+4517 INFO: Initializing module graph hook caches...
+4796 INFO: Analyzing modules for base_library.zip ...
+10281 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\Users\\erickson\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+15109 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\Users\\erickson\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+19065 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\Users\\erickson\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+20779 INFO: Caching module dependency graph...
+21029 INFO: Analyzing D:\OneDrive\Regional\1 pendientes para analisis\proyectospython\LonelyScreenIOS\app.py
+21093 INFO: Processing pre-find-module-path hook 'hook-tkinter.py' from 'C:\\Users\\erickson\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
+21130 INFO: TclTkInfo: initializing cached Tcl/Tk info...
+22876 INFO: Processing standard module hook 'hook-_tkinter.py' from 'C:\\Users\\erickson\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+23240 INFO: Processing standard module hook 'hook-_ctypes.py' from 'C:\\Users\\erickson\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+24505 INFO: Processing module hooks (post-graph stage)...
+24510 INFO: Processing standard module hook 'hook-_tkinter.py' from 'C:\\Users\\erickson\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+24553 INFO: Performing binary vs. data reclassification (2059 entries)
+35812 INFO: Looking for ctypes DLLs
+35957 INFO: Analyzing run-time hooks ...
+35959 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'C:\\Users\\erickson\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+35964 INFO: Including run-time hook 'pyi_rth__tkinter.py' from 'C:\\Users\\erickson\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+36024 INFO: Creating base_library.zip...
+36070 INFO: Looking for dynamic libraries
+36780 INFO: Extra DLL search directories (AddDllDirectory): []
+36780 INFO: Extra DLL search directories (PATH): []
+89681 WARNING: Library not found: could not resolve 'libboost_python311-mt.dll', dependency of 'D:\\OneDrive\\Regional\\1 pendientes para analisis\\proyectospython\\LonelyScreenIOS\\tools\\uxplay\\bin\\libPyImath_Python3_11-3_1.dll'.
+89682 WARNING: Library not found: could not resolve 'libicuuc74.dll', dependency of 'D:\\OneDrive\\Regional\\1 pendientes para analisis\\proyectospython\\LonelyScreenIOS\\tools\\uxplay\\bin\\libharfbuzz-icu-0.dll'.
+92394 INFO: Warnings written to C:\Users\erickson\AppData\Local\Temp\ScreenMirrorIOSAndroid-pyinstaller-build\ScreenMirrorIOSAndroid\warn-ScreenMirrorIOSAndroid.txt
+92443 INFO: Graph cross-reference written to C:\Users\erickson\AppData\Local\Temp\ScreenMirrorIOSAndroid-pyinstaller-build\ScreenMirrorIOSAndroid\xref-ScreenMirrorIOSAndroid.html
+92660 INFO: checking PYZ
+92665 INFO: Building PYZ because PYZ-00.toc is non existent
+92665 INFO: Building PYZ (ZlibArchive) C:\Users\erickson\AppData\Local\Temp\ScreenMirrorIOSAndroid-pyinstaller-build\ScreenMirrorIOSAndroid\PYZ-00.pyz
+92979 INFO: Building PYZ (ZlibArchive) C:\Users\erickson\AppData\Local\Temp\ScreenMirrorIOSAndroid-pyinstaller-build\ScreenMirrorIOSAndroid\PYZ-00.pyz completed successfully.
+93113 INFO: checking PKG
+93114 INFO: Building PKG because PKG-00.toc is non existent
+93114 INFO: Building PKG (CArchive) ScreenMirrorIOSAndroid.pkg
+235585 INFO: Building PKG (CArchive) ScreenMirrorIOSAndroid.pkg completed successfully.
+235697 INFO: Bootloader C:\Users\erickson\AppData\Local\Programs\Python\Python312\Lib\site-packages\PyInstaller\bootloader\Windows-64bit-intel\runw.exe
+235697 INFO: checking EXE
+235697 INFO: Building EXE because EXE-00.toc is non existent
+235697 INFO: Building EXE from EXE-00.toc
+235704 INFO: Copying bootloader EXE to D:\OneDrive\Regional\1 pendientes para analisis\proyectospython\LonelyScreenIOS\ScreenMirrorIOSAndroid.exe
+235727 INFO: Copying icon to EXE
+235738 INFO: Copying 0 resources to EXE
+235738 INFO: Embedding manifest in EXE
+235747 INFO: Appending PKG archive to EXE
+236577 INFO: Fixing EXE headers
+238792 INFO: Building EXE from EXE-00.toc completed successfully.
+238906 INFO: Build complete! The results are available in: D:\OneDrive\Regional\1 pendientes para analisis\proyectospython\LonelyScreenIOS
+Build completed: .\ScreenMirrorIOSAndroid.exe

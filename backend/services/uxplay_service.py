@@ -1065,6 +1065,12 @@ class UxPlayService:
                 "[ADVERTENCIA] VPN activa detectada. Algunas VPN bloquean trafico local/mDNS y el iPhone no ve el receptor."
             )
 
+        # attempt a simple mDNS probe to detect if multicast replies are possible
+        if not self._probe_mdns():
+            hints.append(
+                "[ADVERTENCIA] No se recibieron respuestas mDNS; podria haber bloqueo de multicast o falta de servicio Bonjour."
+            )
+
         firewall_profile = self._query_current_firewall_profile_text()
         low_fw = self._normalize_for_match(firewall_profile)
         if "blockinbound,allowoutbound" in low_fw:
@@ -1152,6 +1158,40 @@ class UxPlayService:
     def _normalize_for_match(self, value: str) -> str:
         lowered = value.lower()
         return "".join(ch for ch in lowered if ch.isascii())
+
+    def _probe_mdns(self) -> bool:
+        """Send a quick mDNS query and return True if any response is received."""
+        try:
+            import socket
+
+            # create IPv4 UDP socket bound to 0.0.0.0:0
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+            sock.settimeout(1.0)
+            # allow address reuse so multiple apps can send/receive
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            # join multicast group on all interfaces
+            group = socket.inet_aton("224.0.0.251")
+            mreq = group + socket.inet_aton("0.0.0.0")
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+
+            # build simple DNS query for _airplay._tcp.local PTR
+            # header: id=0, flags=0x0000, qdcount=1
+            query = b"\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00"
+            # encode _airplay._tcp.local
+            for part in ["_airplay", "_tcp", "local"]:
+                query += bytes([len(part)]) + part.encode("ascii")
+            query += b"\x00"  # terminator
+            query += b"\x00\x0c"  # type PTR
+            query += b"\x00\x01"  # class IN
+
+            sock.sendto(query, ("224.0.0.251", 5353))
+            try:
+                data, addr = sock.recvfrom(1024)
+                return True
+            except socket.timeout:
+                return False
+        except Exception:  # noqa: BLE001
+            return False
 
     def _normalize_mac(self, raw_mac: str) -> str | None:
         compact = "".join(ch for ch in raw_mac if ch.isalnum())
