@@ -141,8 +141,9 @@ class UxPlayService:
                 self._scheduled_recovery_id = None
 
             creationflags = self._creationflags()
-            # Suppress console popups AND keep UxPlay window hidden until client connects
-            startupinfo = self._startupinfo()
+            # Keep console popups suppressed via creationflags, but do not force-hide
+            # startup window state; forcing SW_HIDE can prevent renderer window visibility.
+            startupinfo = None
             environment = self._build_runtime_env(normalized_path)
 
             try:
@@ -652,19 +653,23 @@ class UxPlayService:
         powershell_script = (
             "$ErrorActionPreference='SilentlyContinue';"
             "$changed = New-Object System.Collections.Generic.List[string];"
-            "$lan = Get-NetIPInterface -AddressFamily IPv4 | "
-            "Where-Object { $_.ConnectionState -eq 'Connected' -and ($_.InterfaceAlias -match 'Ethernet|LAN') } | "
-            "Sort-Object InterfaceMetric | Select-Object -First 1;"
-            "if ($null -ne $lan -and $lan.InterfaceMetric -gt 10) {"
-            "  Set-NetIPInterface -InterfaceIndex $lan.InterfaceIndex -AddressFamily IPv4 -InterfaceMetric 10;"
-            "  $changed.Add('LAN:' + $lan.InterfaceAlias) | Out-Null;"
+            "$physical = Get-NetAdapter -Physical -ErrorAction SilentlyContinue | "
+            "Where-Object { $_.Status -eq 'Up' };"
+            "$lan = $physical | Where-Object { $_.Name -match 'Ethernet|LAN' } | Select-Object -First 1;"
+            "if ($null -ne $lan) {"
+            "  $lanIp = Get-NetIPInterface -InterfaceIndex $lan.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue;"
+            "  if ($null -ne $lanIp -and $lanIp.InterfaceMetric -gt 10) {"
+            "    Set-NetIPInterface -InterfaceIndex $lan.ifIndex -AddressFamily IPv4 -InterfaceMetric 10;"
+            "    $changed.Add('LAN:' + $lan.Name) | Out-Null;"
+            "  }"
             "};"
-            "$wifi = Get-NetIPInterface -AddressFamily IPv4 | "
-            "Where-Object { $_.ConnectionState -eq 'Connected' -and ($_.InterfaceAlias -match 'Wi-Fi 2|WiFi 2|Wi-Fi|WiFi|WLAN') } | "
-            "Sort-Object InterfaceMetric | Select-Object -First 1;"
-            "if ($null -ne $wifi -and $wifi.InterfaceMetric -gt 20) {"
-            "  Set-NetIPInterface -InterfaceIndex $wifi.InterfaceIndex -AddressFamily IPv4 -InterfaceMetric 20;"
-            "  $changed.Add('WIFI:' + $wifi.InterfaceAlias) | Out-Null;"
+            "$wifi = $physical | Where-Object { $_.Name -match 'Wi-Fi 2|WiFi 2|Wi-Fi|WiFi|WLAN' } | Select-Object -First 1;"
+            "if ($null -ne $wifi) {"
+            "  $wifiIp = Get-NetIPInterface -InterfaceIndex $wifi.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue;"
+            "  if ($null -ne $wifiIp -and $wifiIp.InterfaceMetric -gt 20) {"
+            "    Set-NetIPInterface -InterfaceIndex $wifi.ifIndex -AddressFamily IPv4 -InterfaceMetric 20;"
+            "    $changed.Add('WIFI:' + $wifi.Name) | Out-Null;"
+            "  }"
             "};"
             "if ($changed.Count -gt 0) { $changed | ForEach-Object { Write-Output $_ } }"
         )
