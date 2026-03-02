@@ -78,8 +78,14 @@ class MainWindow:
             str(saved.get("capture_source_mode", saved.get("capture_source_label", "desktop")))
         )
 
+        saved_uxplay_path = str(saved.get("uxplay_path", "")).strip()
+        if saved_uxplay_path:
+            low_saved_uxplay = saved_uxplay_path.lower()
+            if "\\_mei" in low_saved_uxplay or "/_mei" in low_saved_uxplay or not Path(saved_uxplay_path).exists():
+                saved_uxplay_path = ""
+
         self._receiver_name_var = tk.StringVar(value=str(saved.get("receiver_name", default_receiver_name)))
-        self._uxplay_path_var = tk.StringVar(value=str(saved.get("uxplay_path", str(default_uxplay_path))))
+        self._uxplay_path_var = tk.StringVar(value=saved_uxplay_path or str(default_uxplay_path))
         self._profile_var = tk.StringVar(value=initial_profile.label)
         self._profile_desc_var = tk.StringVar(value=initial_profile.description)
         self._custom_args_var = tk.StringVar(value=str(saved.get("custom_args", "")))

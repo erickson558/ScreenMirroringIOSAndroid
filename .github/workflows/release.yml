@@ -8,6 +8,9 @@ on:
       - "*.md"
       - ".gitignore"
 
+permissions:
+  contents: write
+
 jobs:
   release:
     runs-on: windows-latest
@@ -67,20 +70,12 @@ jobs:
           $size = (Get-Item "dist\ScreenMirrorIOSAndroid.exe").Length
           echo "Build successful - Executable size: $($size / 1MB) MB"
 
-      - name: Create Git Tag
-        if: steps.check_release.outputs.EXISTS == 'false'
-        run: |
-          $tagName = "v${{ steps.version.outputs.VERSION }}"
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          git tag $tagName -m "Release $tagName"
-          git push origin $tagName
-
       - name: Create GitHub Release
         if: steps.check_release.outputs.EXISTS == 'false'
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.version.outputs.VERSION }}
+          target_commitish: ${{ github.sha }}
           name: v${{ steps.version.outputs.VERSION }} - Auto Release
           files: dist/ScreenMirrorIOSAndroid.exe
           draft: false
