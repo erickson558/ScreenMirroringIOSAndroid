@@ -107,6 +107,8 @@ class UxPlayService:
                 runtime_args = ["-nh", *runtime_args]
             preferred_alias = self._normalize_interface_alias(preferred_interface_alias)
 
+            self._try_prioritize_interface_metrics()
+
             # Ensure compatibility flags by default: legacy ports, keep window
             # visible and non-blocking, default window size and Windows D3D11
             # renderer where applicable. Helpers return (args, hint).
@@ -331,21 +333,14 @@ class UxPlayService:
             return (name, args, hint)
 
         if adapters:
-            # Find first non-VPN adapter (preferably wireless) for binding
+            # Find first valid adapter following priority: Ethernet/LAN > Wi-Fi 2 > other Wi-Fi > others
             selected_adapter = None
 
-            # First priority: wireless adapter (Wi-Fi)
             for iface_name, mac in adapters:
-                if self._is_wireless_adapter_name(iface_name) and "vpn" not in iface_name.lower():
-                    selected_adapter = (iface_name, mac)
-                    break
-
-            # Fallback: any non-VPN adapter
-            if selected_adapter is None:
-                for iface_name, mac in adapters:
-                    if "vpn" not in iface_name.lower():
-                        selected_adapter = (iface_name, mac)
-                        break
+                if self._is_excluded_adapter_name(iface_name):
+                    continue
+                selected_adapter = (iface_name, mac)
+                break
 
             # If user specified preferred interface, try to use it
             if preferred_interface_alias:
@@ -581,11 +576,16 @@ class UxPlayService:
 
     def _adapter_priority(self, adapter_name: str) -> tuple[int, str]:
         low = adapter_name.lower()
-        if self._is_wireless_adapter_name(adapter_name):
+        if self._is_excluded_adapter_name(adapter_name):
+            return (9, low)
+        if self._is_ethernet_adapter_name(adapter_name):
             return (0, low)
-        if "ethernet" in low:
+        # Prefer explicit Wi-Fi 2 as second option when LAN is unavailable
+        if low.strip() == "wi-fi 2" or low.strip() == "wifi 2":
             return (1, low)
-        return (2, low)
+        if self._is_wireless_adapter_name(adapter_name):
+            return (2, low)
+        return (3, low)
 
     def list_available_interfaces(self) -> list[tuple[str, str]]:
         if os.name != "nt":
@@ -616,6 +616,82 @@ class UxPlayService:
     def _is_wireless_adapter_name(self, adapter_name: str) -> bool:
         low = adapter_name.lower()
         return "wi-fi" in low or "wifi" in low or "wlan" in low or "wireless" in low
+
+    def _is_ethernet_adapter_name(self, adapter_name: str) -> bool:
+        low = adapter_name.lower()
+        return "ethernet" in low or "lan" in low
+
+    def _is_excluded_adapter_name(self, adapter_name: str) -> bool:
+        low = adapter_name.lower()
+        return any(
+            token in low
+            for token in (
+                "vpn",
+                "wireguard",
+                "openvpn",
+                "checkpoint",
+                "anyconnect",
+                "fortinet",
+                "tailscale",
+                "zerotier",
+                "hamachi",
+                "vethernet",
+                "hyper-v",
+                "virtualbox",
+                "vmware",
+                "loopback",
+                "tun",
+                "tap",
+            )
+        )
+
+    def _try_prioritize_interface_metrics(self) -> None:
+        if os.name != "nt":
+            return
+
+        powershell_script = (
+            "$ErrorActionPreference='SilentlyContinue';"
+            "$changed = New-Object System.Collections.Generic.List[string];"
+            "$lan = Get-NetIPInterface -AddressFamily IPv4 | "
+            "Where-Object { $_.ConnectionState -eq 'Connected' -and ($_.InterfaceAlias -match 'Ethernet|LAN') } | "
+            "Sort-Object InterfaceMetric | Select-Object -First 1;"
+            "if ($null -ne $lan -and $lan.InterfaceMetric -gt 10) {"
+            "  Set-NetIPInterface -InterfaceIndex $lan.InterfaceIndex -AddressFamily IPv4 -InterfaceMetric 10;"
+            "  $changed.Add('LAN:' + $lan.InterfaceAlias) | Out-Null;"
+            "};"
+            "$wifi = Get-NetIPInterface -AddressFamily IPv4 | "
+            "Where-Object { $_.ConnectionState -eq 'Connected' -and ($_.InterfaceAlias -match 'Wi-Fi 2|WiFi 2|Wi-Fi|WiFi|WLAN') } | "
+            "Sort-Object InterfaceMetric | Select-Object -First 1;"
+            "if ($null -ne $wifi -and $wifi.InterfaceMetric -gt 20) {"
+            "  Set-NetIPInterface -InterfaceIndex $wifi.InterfaceIndex -AddressFamily IPv4 -InterfaceMetric 20;"
+            "  $changed.Add('WIFI:' + $wifi.InterfaceAlias) | Out-Null;"
+            "};"
+            "if ($changed.Count -gt 0) { $changed | ForEach-Object { Write-Output $_ } }"
+        )
+
+        try:
+            completed = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", powershell_script],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=8,
+                stdin=subprocess.DEVNULL,
+                creationflags=self._creationflags(),
+                startupinfo=self._startupinfo(),
+            )
+        except (OSError, subprocess.SubprocessError):
+            return
+
+        if completed.returncode not in (0, 1):
+            return
+
+        changes = [line.strip() for line in (completed.stdout or "").splitlines() if line.strip()]
+        if changes:
+            self._emit_log(
+                "[PISTA] Se ajustaron metricas de red para priorizar anuncio AirPlay en LAN/Wi-Fi: "
+                + ", ".join(changes)
+            )
 
     def _process_key(self, process: subprocess.Popen[str]) -> int:
         return process.pid if process.pid is not None else id(process)
@@ -1084,6 +1160,7 @@ class UxPlayService:
         low_fw = self._normalize_for_match(firewall_profile)
         has_block_inbound = "blockinbound,allowoutbound" in low_fw
         has_gpo_locked_rules = "localfirewallrules" in low_fw and "n/a" in low_fw
+        has_effective_discovery_rules = self._has_effective_discovery_firewall_rules()
 
         if has_block_inbound:
             hints.append(
@@ -1093,7 +1170,7 @@ class UxPlayService:
             hints.append(
                 "[ADVERTENCIA] Reglas locales de firewall deshabilitadas por politica (GPO). Requiere ajuste de TI/red."
             )
-        if has_block_inbound and has_gpo_locked_rules:
+        if has_block_inbound and has_gpo_locked_rules and not has_effective_discovery_rules:
             hints.append(
                 "[ERROR] Descubrimiento AirPlay bloqueado por politica corporativa (GPO): "
                 "firewall en BlockInbound sin reglas locales habilitadas."
@@ -1102,6 +1179,14 @@ class UxPlayService:
                 "[PISTA] Solicita a TI habilitar excepcion en GPO para Bonjour/mDNS (UDP 5353) "
                 "y AirPlay (UDP 6000,6001,7011; TCP 7000,7001,7100) en perfil Privado."
             )
+        elif has_block_inbound and has_gpo_locked_rules and has_effective_discovery_rules:
+            hints.append(
+                "[PISTA] Firewall administrado por GPO detectado, pero existen reglas efectivas para AirPlay/mDNS."
+            )
+
+        virtual_priority_risk = self._detect_virtual_interface_metric_risk()
+        if virtual_priority_risk:
+            hints.append(virtual_priority_risk)
 
         # Check Bonjour service
         if not self._check_bonjour_service():
@@ -1367,14 +1452,20 @@ class UxPlayService:
         firewall_profile = self._query_current_firewall_profile_text()
         low_fw = self._normalize_for_match(firewall_profile)
         has_gpo_locked_rules = "localfirewallrules" in low_fw and "n/a" in low_fw
+        has_effective_discovery_rules = self._has_effective_discovery_firewall_rules()
         if has_gpo_locked_rules:
-            self._emit_log(
-                "[ERROR] No se pueden crear reglas locales de firewall: controladas por politica corporativa (GPO)."
-            )
-            self._emit_log(
-                "[PISTA] Solicita a TI agregar excepciones en GPO para Bonjour/mDNS (UDP 5353) "
-                "y AirPlay (UDP 6000,6001,7011; TCP 7000,7001,7100)."
-            )
+            if has_effective_discovery_rules:
+                self._emit_log(
+                    "[PISTA] Firewall administrado por GPO: se omitio alta de reglas locales porque ya existen reglas efectivas."
+                )
+            else:
+                self._emit_log(
+                    "[ERROR] No se pueden crear reglas locales de firewall: controladas por politica corporativa (GPO)."
+                )
+                self._emit_log(
+                    "[PISTA] Solicita a TI agregar excepciones en GPO para Bonjour/mDNS (UDP 5353) "
+                    "y AirPlay (UDP 6000,6001,7011; TCP 7000,7001,7100)."
+                )
             return
 
         rule_name = "UxPlay AirPlay"
@@ -1475,6 +1566,98 @@ class UxPlayService:
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startupinfo.wShowWindow = 0
         return startupinfo
+
+    def _has_effective_discovery_firewall_rules(self) -> bool:
+        if os.name != "nt":
+            return True
+
+        powershell_script = (
+            "$ErrorActionPreference='SilentlyContinue';"
+            "$count = (Get-NetFirewallRule -Enabled True -Direction Inbound -Action Allow | "
+            "Where-Object { $_.DisplayName -match 'UxPlay|AirPlay|mDNS|Bonjour|LonelyScreen' } | "
+            "Measure-Object).Count;"
+            "Write-Output $count;"
+        )
+
+        try:
+            completed = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", powershell_script],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=6,
+                stdin=subprocess.DEVNULL,
+                creationflags=self._creationflags(),
+                startupinfo=self._startupinfo(),
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+
+        if completed.returncode not in (0, 1):
+            return False
+
+        raw = (completed.stdout or "").strip().splitlines()
+        if not raw:
+            return False
+        try:
+            return int(raw[-1].strip()) > 0
+        except ValueError:
+            return False
+
+    def _detect_virtual_interface_metric_risk(self) -> str | None:
+        if os.name != "nt":
+            return None
+
+        powershell_script = (
+            "$ErrorActionPreference='SilentlyContinue';"
+            "$wifi = Get-NetIPInterface -AddressFamily IPv4 | "
+            "Where-Object { $_.InterfaceAlias -like '*Wi-Fi*' -and $_.ConnectionState -eq 'Connected' } | "
+            "Sort-Object InterfaceMetric | Select-Object -First 1;"
+            "if ($null -eq $wifi) { return };"
+            "$candidates = Get-NetIPInterface -AddressFamily IPv4 | "
+            "Where-Object { $_.ConnectionState -eq 'Connected' -and $_.InterfaceAlias -ne $wifi.InterfaceAlias -and $_.InterfaceMetric -lt $wifi.InterfaceMetric };"
+            "foreach ($item in $candidates) {"
+            "  $adapter = Get-NetAdapter -InterfaceIndex $item.InterfaceIndex -ErrorAction SilentlyContinue;"
+            "  $joined = (($item.InterfaceAlias + ' ' + ($adapter.InterfaceDescription + ''))).ToLowerInvariant();"
+            "  if ($joined -match 'vethernet|hyper-v|virtual|vmware|hamachi|vpn|tap|tun|loopback|tailscale|zerotier') {"
+            "    Write-Output ($item.InterfaceAlias + '|' + $item.InterfaceMetric + '|' + $wifi.InterfaceAlias + '|' + $wifi.InterfaceMetric);"
+            "    break;"
+            "  }"
+            "}"
+        )
+
+        try:
+            completed = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", powershell_script],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=7,
+                stdin=subprocess.DEVNULL,
+                creationflags=self._creationflags(),
+                startupinfo=self._startupinfo(),
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+        if completed.returncode not in (0, 1):
+            return None
+
+        rows = [line.strip() for line in (completed.stdout or "").splitlines() if "|" in line]
+        if not rows:
+            return None
+
+        parts = rows[0].split("|")
+        if len(parts) != 4:
+            return None
+
+        virtual_alias, virtual_metric, wifi_alias, wifi_metric = [part.strip() for part in parts]
+        return (
+            "[ADVERTENCIA] Interfaz virtual con mayor prioridad detectada "
+            f"({virtual_alias}, metrica {virtual_metric}) sobre {wifi_alias} (metrica {wifi_metric}). "
+            "Esto puede ocultar el receptor al iPhone. "
+            f"Ejecuta como admin: Set-NetIPInterface -InterfaceAlias '{wifi_alias}' -AddressFamily IPv4 -InterfaceMetric 10"
+        )
 
     def _normalize_log_message(self, message: str) -> str:
         # Normalize common mojibake sequences produced by mixed code pages.
