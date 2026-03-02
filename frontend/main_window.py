@@ -431,6 +431,12 @@ class MainWindow:
         self._log_box.tag_configure("warning", foreground="#fbbf24")
         self._log_box.tag_configure("hint", foreground="#67e8f9")
         self._log_box.tag_configure("recording", foreground="#f472b6")
+        # Add a small action row to run network diagnostics manually
+        btn_frame = tk.Frame(logs_card)
+        btn_frame.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+        btn_frame.columnconfigure(0, weight=1)
+        self._diag_button = ttk.Button(btn_frame, text=self._tr("btn_diagnose_network") if hasattr(self, "_tr") else "Diagnosticar red", command=self._on_run_network_diagnostics)
+        self._diag_button.grid(row=0, column=0, sticky="e")
 
     def _build_menu(self) -> None:
         self._menu_bar = tk.Menu(self._root)
@@ -817,6 +823,20 @@ class MainWindow:
                 self._log_box.insert("end", line)
         self._log_box.see("end")
         self._log_box.configure(state="disabled")
+
+    def _on_run_network_diagnostics(self) -> None:
+        try:
+            diagnostics = self._controller.get_network_discovery_diagnostics()
+        except Exception as exc:  # pragma: no cover - defensive
+            self._append_log(f"[ERROR] Error al ejecutar diagnóstico de red: {exc}")
+            return
+
+        if not diagnostics:
+            self._append_log("[PISTA] Diagnóstico: no se detectaron problemas de descubrimiento de red.")
+            return
+
+        for line in diagnostics:
+            self._append_log(line)
 
     def _install_autosave(self) -> None:
         vars_ = (

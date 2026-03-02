@@ -1084,6 +1084,14 @@ class UxPlayService:
 
         return hints
 
+    def get_network_diagnostics(self) -> list[str]:
+        """Public wrapper to retrieve network / mDNS diagnostics.
+
+        Returns a list of human-readable hints and warnings useful for
+        diagnosing why AirPlay discovery may fail on the current host.
+        """
+        return self._diagnose_windows_discovery_risks()
+
     def _is_windows_vpn_active(self) -> bool:
         if os.name != "nt":
             return False

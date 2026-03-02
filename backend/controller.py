@@ -72,6 +72,10 @@ class AppController:
     def get_android_projection_diagnostics(self) -> dict[str, str | bool | None]:
         return self._projection_service.get_diagnostics()
 
+    def get_network_discovery_diagnostics(self) -> list[str]:
+        """Return network / mDNS diagnostics for the AirPlay receiver."""
+        return self._service.get_network_diagnostics()
+
     def take_snapshot(
         self,
         uxplay_path: Path,
