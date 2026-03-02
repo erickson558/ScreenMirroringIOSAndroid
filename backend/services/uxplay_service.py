@@ -318,9 +318,11 @@ class UxPlayService:
     ) -> list[tuple[str, list[str], str | None]]:
         """Build launch plans for AirPlay receiver.
 
-        Note: UxPlay with -m MAC argument binds to localhost which prevents
-        network discovery. Instead, we let UxPlay listen on all interfaces (0.0.0.0)
-        and rely on Bonjour to advertise the service on the correct network.
+        IMPORTANT: UxPlay MUST bind to a specific MAC address (-m) to ensure
+        Bonjour announces through the CORRECT network interface. If we use
+        0.0.0.0 (all interfaces), Bonjour may choose a virtual/WSL interface
+        instead of the real Wi-Fi interface, making the service invisible to
+        the iPhone.
         """
         adapters = self.list_available_interfaces()
 
@@ -328,21 +330,39 @@ class UxPlayService:
         def plan(name: str, args: list[str], hint: str | None = None) -> tuple[str, list[str], str | None]:
             return (name, args, hint)
 
-        # No longer use -m MAC as it causes localhost-only binding
-        # Instead, let UxPlay listen on all interfaces and use Bonjour for discovery
-        hint = None
         if adapters:
-            # Find first non-VPN adapter for logging purposes
+            # Find first non-VPN adapter (preferably wireless) for binding
+            selected_adapter = None
+            
+            # First priority: wireless adapter (Wi-Fi)
             for iface_name, mac in adapters:
-                if "vpn" not in iface_name.lower():
-                    hint = f"[PISTA] Receptor escuchando en todas las interfaces; Bonjour anunciara en {iface_name}."
+                if self._is_wireless_adapter_name(iface_name) and "vpn" not in iface_name.lower():
+                    selected_adapter = (iface_name, mac)
                     break
+            
+                    # Fallback: any non-VPN adapter
+                    if selected_adapter is None:
+                        for iface_name, mac in adapters:
+                            if "vpn" not in iface_name.lower():
+                                selected_adapter = (iface_name, mac)
+                                break
+            
+                    # If user specified preferred interface, try to use it
+                    if preferred_interface_alias:
+                        preferred_sel = self._select_preferred_adapter(adapters, preferred_interface_alias)
+                        if preferred_sel:
+                            selected_adapter = preferred_sel
+            
+                    if selected_adapter:
+                        iface_name, mac = selected_adapter
+                        hint = f"[PISTA] UxPlay enlazado a interfaz '{iface_name}' (MAC {mac}) para que Bonjour anuncie en la red correcta."
+                        if self._is_windows_vpn_active():
+                            hint += " [ADVERTENCIA] VPN activa detectada; puede bloquear mDNS."
+                        return [plan(f"{receiver_name} [{iface_name}]", [*runtime_args, "-m", mac], hint)]
         
-        if hint is None:
-            hint = "[PISTA] Receptor escuchando en todas las interfaces de red."
-        
-        return [(receiver_name, runtime_args, hint)]
 
+        # Fallback if no adapters found
+        return [(receiver_name, runtime_args, None)]
     def _terminate_stale_uxplay_instances(self, uxplay_path: Path) -> int:
         if os.name != "nt":
             return 0
