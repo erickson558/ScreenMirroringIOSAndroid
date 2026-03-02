@@ -124,7 +124,10 @@ class UxPlayService:
             if hint:
                 startup_hints.append(hint)
 
-            runtime_args, hint = self._ensure_windows_d3d11_renderer(runtime_args)
+            runtime_args, hint = self._ensure_windows_d3d11_renderer(
+                runtime_args,
+                allow_default=not _from_auto_recovery,
+            )
             if hint:
                 startup_hints.append(hint)
 
@@ -486,10 +489,16 @@ class UxPlayService:
             index += 1
         return False
 
-    def _ensure_windows_d3d11_renderer(self, runtime_args: list[str]) -> tuple[list[str], str | None]:
+    def _ensure_windows_d3d11_renderer(
+        self,
+        runtime_args: list[str],
+        allow_default: bool = True,
+    ) -> tuple[list[str], str | None]:
         if os.name != "nt":
             return runtime_args, None
         if self._has_explicit_renderer_args(runtime_args):
+            return runtime_args, None
+        if not allow_default:
             return runtime_args, None
         return (
             [
