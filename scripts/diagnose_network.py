@@ -59,10 +59,10 @@ def check_mdns():
         mreq = group + socket.inet_aton("0.0.0.0")
         try:
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-            print("✓ mDNS multicast group joined successfully")
+            print("[OK] mDNS multicast group joined successfully")
         except OSError as e:
-            print(f"✗ Failed to join mDNS multicast group: {e}")
-            print("  → Firewall or network issue blocking multicast")
+            print(f"[FAIL] Failed to join mDNS multicast group: {e}")
+            print("  -> Firewall or network issue blocking multicast")
             sock.close()
             return
         
@@ -73,18 +73,18 @@ def check_mdns():
         query += b"\x00\x00\x0c\x00\x01"
         
         sock.sendto(query, ("224.0.0.251", 5353))
-        print("✓ mDNS query sent")
+        print("[OK] mDNS query sent")
         
         try:
             data, addr = sock.recvfrom(1024)
-            print(f"✓ mDNS response received from {addr}")
+            print(f"[OK] mDNS response received from {addr}")
         except socket.timeout:
-            print("✗ No mDNS responses received (timeout)")
-            print("  → Check if Bonjour/mDNS service is running")
+            print("[FAIL] No mDNS responses received (timeout)")
+            print("  -> Check if Bonjour/mDNS service is running")
         
         sock.close()
     except Exception as e:
-        print(f"✗ mDNS test failed: {e}")
+        print(f"[FAIL] mDNS test failed: {e}")
 
 
 def check_network_interfaces():
@@ -126,12 +126,16 @@ def check_bonjour_service():
     """Check if Bonjour service is running."""
     print("\n=== BONJOUR SERVICE ===")
     
-    output = run_cmd('sc query "Bonjour Service" | findstr STATE')
-    if "RUNNING" in output:
-        print("✓ Bonjour Service is RUNNING")
-    else:
-        print("✗ Bonjour Service is NOT RUNNING or not installed")
-        print("  → Install Bonjour from https://support.apple.com/downloads/bonjour")
+    # Try both possible names
+    for service_name in ["Bonjour Service", "mDNSResponder"]:
+        output = run_cmd(f'sc query "{service_name}" | findstr STATE')
+        if output.strip():
+            if "RUNNING" in output.upper():
+                print(f"✓ {service_name} is RUNNING")
+                return True
+    
+    print("✗ Bonjour Service is NOT RUNNING or not installed")
+    print("  → Install Bonjour from https://support.apple.com/downloads/bonjour")
 
 
 def main():
