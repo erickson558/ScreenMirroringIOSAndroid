@@ -1591,21 +1591,13 @@ class MainWindow:
             if not user32.IsWindow(hwnd):
                 return
             
-            # Restore original window style
-            GWL_STYLE = -16
-            if self._embedded_original_style is not None:
-                user32.SetWindowLongW(hwnd, GWL_STYLE, int(self._embedded_original_style))
-                user32.SetWindowPos(
-                    hwnd,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0x0027,  # SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_FRAMECHANGED
-                )
+            # Simply move window to fullscreen without changing style
+            # Keep it as popup to maintain stability with GStreamer
+            screen_width = user32.GetSystemMetrics(0)  # SM_CXSCREEN
+            screen_height = user32.GetSystemMetrics(1)  # SM_CYSCREEN
             
-            # Show window in normal state (not minimized, not maximized)
+            SWP_NOZORDER = 0x0004
+            user32.SetWindowPos(hwnd, 0, 0, 0, screen_width, screen_height, SWP_NOZORDER)
             user32.ShowWindow(hwnd, 1)  # SW_NORMAL
             user32.SetForegroundWindow(hwnd)  # Bring to focus
             
@@ -1620,7 +1612,7 @@ class MainWindow:
                 self._embed_retry_after_id = None
             self._embed_retry_left = 0
             
-            self._append_log("[PISTA] Ventana de iPhone desacoplada y mostrada como ventana independiente.")
+            self._append_log("[PISTA] Ventana de iPhone desacoplada y mostrada en pantalla completa.")
             self._btn_detach_window.configure(state="disabled")
             self._set_preview_hint(self._tr("preview_hint_wait_stream"))
             self._preview_overlay.place(relx=0.5, rely=0.5, anchor="center")
@@ -1641,20 +1633,10 @@ class MainWindow:
             try:
                 user32 = ctypes.windll.user32
                 if user32.IsWindow(hwnd):
-                    # restore original style so the video window behaves normally
-                    GWL_STYLE = -16
-                    if self._embedded_original_style is not None:
-                        user32.SetWindowLongW(hwnd, GWL_STYLE, int(self._embedded_original_style))
-                        user32.SetWindowPos(
-                            hwnd,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0x0027,  # SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_FRAMECHANGED
-                        )
-                    # move it offscreen so it doesn't interfere visually
-                    user32.SetWindowPos(hwnd, 0, -10000, -10000, 0, 0, 0x0001)
+                    # Simply move window offscreen without changing style
+                    # Keep popup style for stability with GStreamer
+                    SWP_NOZORDER = 0x0004
+                    user32.SetWindowPos(hwnd, 0, -10000, -10000, 0, 0, SWP_NOZORDER)
             except Exception:
                 pass
         self._preview_overlay.place(relx=0.5, rely=0.5, anchor="center")
