@@ -80,6 +80,10 @@ class AppController:
         """Attempt to automatically install Bonjour on Windows."""
         return self._service.install_bonjour()
 
+    def install_uxplay_runtime(self, target_dir: Path) -> Path:
+        """Install/copy UxPlay runtime files into target directory and return uxplay.exe path."""
+        return self._service.install_uxplay_runtime(target_dir=target_dir)
+
     def repair_airplay_network(self) -> bool:
         """Run a quick repair sequence for AirPlay discovery issues."""
         return self._service.repair_airplay_connectivity()

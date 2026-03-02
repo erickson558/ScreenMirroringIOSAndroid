@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -1476,6 +1477,64 @@ class UxPlayService:
                     installer_path.unlink()
             except Exception:  # noqa: BLE001
                 pass
+
+    def install_uxplay_runtime(self, target_dir: Path) -> Path:
+        """Install/copy UxPlay runtime into target_dir and return uxplay.exe path."""
+        destination = target_dir.expanduser().resolve()
+        destination.mkdir(parents=True, exist_ok=True)
+
+        source = self._find_uxplay_runtime_source()
+        if source is None:
+            raise FileNotFoundError(
+                "No se encontro un runtime de UxPlay para instalar. "
+                "Coloca la carpeta 'tools/uxplay' junto al .exe o al proyecto."
+            )
+
+        if source != destination:
+            shutil.copytree(source, destination, dirs_exist_ok=True)
+
+        uxplay_exe = destination / "bin" / "uxplay.exe"
+        if not uxplay_exe.exists():
+            uxplay_exe = destination / "uxplay.exe"
+        if not uxplay_exe.exists():
+            raise FileNotFoundError(f"La instalacion de UxPlay no contiene uxplay.exe en: {destination}")
+
+        self._emit_log(f"[PISTA] Runtime UxPlay instalado en: {destination}")
+        return uxplay_exe.resolve()
+
+    def _find_uxplay_runtime_source(self) -> Path | None:
+        candidates: list[Path] = []
+
+        exe_dir = Path(sys.executable).resolve().parent
+        candidates.append(exe_dir / "tools" / "uxplay")
+        candidates.append(exe_dir / "uxplay")
+
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            mei_dir = Path(str(meipass)).resolve()
+            candidates.append(mei_dir / "tools" / "uxplay")
+            candidates.append(mei_dir / "uxplay")
+
+        module_root = Path(__file__).resolve().parents[2]
+        candidates.append(module_root / "tools" / "uxplay")
+        candidates.append(Path.cwd() / "tools" / "uxplay")
+
+        seen: set[str] = set()
+        for candidate in candidates:
+            key = str(candidate).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            if self._is_uxplay_runtime_folder(candidate):
+                return candidate
+        return None
+
+    def _is_uxplay_runtime_folder(self, folder: Path) -> bool:
+        if not folder.exists() or not folder.is_dir():
+            return False
+        if (folder / "bin" / "uxplay.exe").exists():
+            return True
+        return (folder / "uxplay.exe").exists()
 
     def _is_windows_vpn_active(self) -> bool:
         if os.name != "nt":

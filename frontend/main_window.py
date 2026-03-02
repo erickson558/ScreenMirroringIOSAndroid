@@ -57,6 +57,7 @@ class MainWindow:
         self._root = root
         self._controller = controller
         self._store = GuiConfigStore(gui_config_path)
+        self._app_dir = gui_config_path.resolve().parent
         self._app_name = app_name
         self._app_version = app_version
 
@@ -526,6 +527,14 @@ class MainWindow:
             command=self._browse_uxplay,
         )
         self._btn_browse.grid(row=2, column=2, sticky="ew", padx=(8, 0), pady=(0, 8))
+
+        self._btn_install_uxplay = ttk.Button(
+            card,
+            text=self._tr("btn_install_uxplay"),
+            style="Glass.TButton",
+            command=self._on_install_uxplay,
+        )
+        self._btn_install_uxplay.grid(row=2, column=3, sticky="ew", padx=(8, 0), pady=(0, 8))
 
         ttk.Label(card, text=self._tr("lbl_device"), underline=0, style="Card.TLabel").grid(
             row=3, column=0, sticky="nw", padx=(0, 8)
@@ -1048,14 +1057,44 @@ class MainWindow:
             self._set_status(self._tr("status_wait_current_operation"), "warning")
             return
 
-        selected = filedialog.askopenfilename(
-            title=self._tr("title_pick_uxplay"),
-            filetypes=[("Ejecutable", "*.exe"), ("Todos los archivos", "*.*")],
+        selected = filedialog.askdirectory(
+            title=self._tr("title_pick_uxplay_folder"),
+            initialdir=str(self._app_dir),
         )
         if selected:
-            self._uxplay_path_var.set(selected)
-            self._set_status(self._tr("status_uxplay_path_updated"), "success")
+            selected_path = Path(selected)
+            candidate_paths = (
+                selected_path / "bin" / "uxplay.exe",
+                selected_path / "uxplay.exe",
+                selected_path / "tools" / "uxplay" / "bin" / "uxplay.exe",
+            )
+            resolved = next((path for path in candidate_paths if path.exists()), None)
+            if resolved is None:
+                self._set_status(self._tr("error_uxplay_folder_invalid"), "error")
+                return
+
+            self._uxplay_path_var.set(str(resolved.resolve()))
+            self._set_status(self._tr("status_uxplay_folder_updated"), "success")
             self._schedule_save()
+
+    def _on_install_uxplay(self) -> None:
+        if self._is_busy():
+            self._set_status(self._tr("status_wait_current_operation"), "warning")
+            return
+
+        target_root = self._app_dir / "tools" / "uxplay"
+        self._append_log(self._tr("action_install_uxplay", target=target_root))
+
+        def install_runtime() -> None:
+            installed_exe = self._controller.install_uxplay_runtime(target_dir=target_root)
+            self._uxplay_path_var.set(str(installed_exe))
+            self._schedule_save()
+
+        self._run_in_background(
+            action_label=self._tr("action_install_uxplay_short"),
+            fn=install_runtime,
+            success_status=self._tr("status_uxplay_installed", target=target_root),
+        )
 
     def _toggle_receiver(self) -> None:
         if self._is_busy():
@@ -1966,6 +2005,7 @@ class MainWindow:
         self._btn_snapshot.configure(state=state)
         self._btn_record.configure(state=state)
         self._btn_browse.configure(state=state)
+        self._btn_install_uxplay.configure(state=state)
         self._btn_clear.configure(state=state)
         self._btn_refresh_bind_targets.configure(state=state)
         self._btn_exit.configure(state="normal")
