@@ -49,7 +49,7 @@ class UxPlayService:
         self._recovery_sequence = 0
         self._recovery_delay_seconds = 2.5
         self._manual_stop_until = 0.0
-        self._window_probe_delay_seconds = 4.5
+        self._window_probe_delay_seconds = 10.0
         self._window_probe_sequence = 0
         self._pending_window_probes: dict[int, int] = {}
         self._lock = threading.Lock()
@@ -841,6 +841,24 @@ class UxPlayService:
                     )
                     return
 
+            # Window still not visible after first attempt
+            # Try additional checks with short delays before giving up
+            for retry in range(3):
+                time.sleep(1.5)
+                if self._has_visible_window_for_process(process):
+                    with self._lock:
+                        self._pending_window_probes.pop(key, None)
+                    self._emit_log("[PISTA] Ventana detectada en retry posterior.")
+                    return
+                
+                if self._try_restore_window_for_process(process):
+                    time.sleep(0.9)
+                    if self._has_visible_window_for_process(process):
+                        with self._lock:
+                            self._pending_window_probes.pop(key, None)
+                        self._emit_log("[PISTA] Ventana restaurada en retry.")
+                        return
+
             with self._lock:
                 self._pending_window_probes.pop(key, None)
 
@@ -848,11 +866,11 @@ class UxPlayService:
                 return
 
             self._emit_log(
-                "[ADVERTENCIA] Mirroring activo sin ventana de video visible en PC. "
+                "[ADVERTENCIA] Mirroring activo sin ventana de video visible en PC tras multiples intentos. "
                 "Se iniciara recuperacion automatica."
             )
             self._request_auto_recovery(
-                trigger_line="Mirroring iniciado sin ventana visible detectado por sonda local.",
+                trigger_line="Mirroring iniciado sin ventana visible detectado por sonda local (tras intentos).",
                 prefer_d3d11=True,
             )
 
