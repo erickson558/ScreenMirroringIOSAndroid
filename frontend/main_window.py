@@ -462,6 +462,8 @@ class MainWindow:
 
         self._menu_help = tk.Menu(self._menu_bar, tearoff=0)
         self._menu_help.add_command(label=self._tr("menu_about"), underline=0, accelerator="F1", command=self._show_about_dialog)
+        self._menu_help.add_separator()
+        self._menu_help.add_command(label=self._tr("menu_install_bonjour"), command=self._on_install_bonjour)
         self._menu_bar.add_cascade(label=self._tr("menu_help"), underline=0, menu=self._menu_help)
 
         self._root.configure(menu=self._menu_bar)
@@ -1698,6 +1700,27 @@ class MainWindow:
         dialog.bind("<Escape>", lambda _e: dialog.destroy())
         dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
         self._about_dialog = dialog
+
+    def _on_install_bonjour(self) -> None:
+        """Start automatic Bonjour installation in background thread."""
+        self._set_status(self._tr("status_installing_bonjour"), "info")
+        self._append_log(self._tr("action_install_bonjour"))
+        
+        def install_worker() -> None:
+            try:
+                success = self._controller.install_bonjour()
+                if success:
+                    self._append_log(self._tr("success_bonjour_installed"))
+                    self._set_status(self._tr("success_bonjour_installed"), "success")
+                else:
+                    self._append_log(self._tr("error_bonjour_install_failed"))
+                    self._set_status(self._tr("error_bonjour_install_failed"), "error")
+            except Exception as exc:  # pragma: no cover
+                self._append_log(f"[ERROR] {exc}")
+                self._set_status(f"Error: {exc}", "error")
+        
+        thread = threading.Thread(target=install_worker, daemon=True)
+        thread.start()
 
     def _set_status(self, message: str, level: str) -> None:
         clean = " ".join(message.strip().split())

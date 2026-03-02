@@ -156,6 +156,11 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "btn_diagnose_network": "Diagnosticar red",
         "success_diagnose_network_none": "[PISTA] Diagnóstico: no se detectaron problemas de descubrimiento de red.",
         "error_diagnose_network_failed": "[ERROR] Error al ejecutar diagnóstico de red: {error}",
+        "menu_install_bonjour": "Instalar Bonjour",
+        "action_install_bonjour": "[PISTA] Iniciando descarga e instalación de Bonjour...",
+        "status_installing_bonjour": "Instalando Bonjour...",
+        "success_bonjour_installed": "[PISTA] Bonjour instalado exitosamente. El iPhone ya puede detectar el receptor.",
+        "error_bonjour_install_failed": "[ERROR] No se pudo instalar Bonjour. Ver TROUBLESHOOTING.md para instalación manual.",
     },
     LANGUAGE_EN: {
         "window_title": "{app_name} - Studio Neon",
@@ -301,6 +306,11 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "btn_diagnose_network": "Diagnose network",
         "success_diagnose_network_none": "[HINT] Diagnostics: no network discovery issues detected.",
         "error_diagnose_network_failed": "[ERROR] Error running network diagnostics: {error}",
+        "menu_install_bonjour": "Install Bonjour",
+        "action_install_bonjour": "[HINT] Starting Bonjour download and installation...",
+        "status_installing_bonjour": "Installing Bonjour...",
+        "success_bonjour_installed": "[HINT] Bonjour installed successfully. iPhone can now detect the receiver.",
+        "error_bonjour_install_failed": "[ERROR] Could not install Bonjour. See TROUBLESHOOTING.md for manual installation.",
     },
 }
 

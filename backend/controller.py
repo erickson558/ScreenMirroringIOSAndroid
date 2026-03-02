@@ -76,6 +76,10 @@ class AppController:
         """Return network / mDNS diagnostics for the AirPlay receiver."""
         return self._service.get_network_diagnostics()
 
+    def install_bonjour(self) -> bool:
+        """Attempt to automatically install Bonjour on Windows."""
+        return self._service.install_bonjour()
+
     def take_snapshot(
         self,
         uxplay_path: Path,

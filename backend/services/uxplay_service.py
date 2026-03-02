@@ -5,11 +5,14 @@ from ctypes import wintypes
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import shutil
 import subprocess
+import tempfile
 import threading
 import time
 import unicodedata
 from typing import Callable
+from urllib.request import urlopen
 
 LogCallback = Callable[[str], None]
 StateCallback = Callable[[bool], None]
@@ -1128,6 +1131,81 @@ class UxPlayService:
             return "RUNNING" in (output.stdout or "").upper()
         except Exception:  # noqa: BLE001
             return False
+
+    def install_bonjour(self) -> bool:
+        """Attempt to automatically download and install Bonjour on Windows.
+
+        Returns True if installation succeeds, False otherwise.
+        """
+        if os.name != "nt":
+            self._emit_log("Bonjour installation solo se soporta en Windows.")
+            return False
+
+        # Check if already installed
+        if self._check_bonjour_service():
+            self._emit_log("[PISTA] Bonjour ya esta instalado.")
+            return True
+
+        self._emit_log("[PISTA] Descargando Bonjour desde Apple...")
+
+        try:
+            # Download Bonjour installer from Apple
+            bonjour_url = "https://support.apple.com/downloads/DL100/en_US/BonjourPSSetup.exe"
+            temp_dir = Path(tempfile.gettempdir())
+            installer_path = temp_dir / "BonjourPSSetup.exe"
+
+            # Download with timeout
+            self._emit_log(f"Descargando desde: {bonjour_url}")
+            response = urlopen(bonjour_url, timeout=30)
+            with open(installer_path, "wb") as f:
+                while True:
+                    chunk = response.read(8192)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+
+            if not installer_path.exists():
+                self._emit_log("[ERROR] No se pudo descargar el instalador de Bonjour.")
+                return False
+
+            self._emit_log(f"[PISTA] Instalador descargado: {installer_path}")
+            self._emit_log("[PISTA] Ejecutando instalador de Bonjour...")
+
+            # Run installer with admin privileges
+            # Use 'runas' through shellexecute via PowerShell
+            ps_cmd = (
+                f'Start-Process -FilePath "{installer_path}" '
+                '-Verb RunAs -Wait'
+            )
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", ps_cmd],
+                capture_output=True,
+                timeout=120,
+                stdin=subprocess.DEVNULL,
+                creationflags=self._creationflags(),
+            )
+
+            # Wait for service to start
+            for i in range(10):
+                time.sleep(1)
+                if self._check_bonjour_service():
+                    self._emit_log("[PISTA] Bonjour instalado e iniciado exitosamente.")
+                    return True
+
+            self._emit_log("[ADVERTENCIA] Bonjour se instalo pero el servicio no inicio. Reinicia tu equipo.")
+            return False
+
+        except Exception as e:  # noqa: BLE001
+            self._emit_log(f"[ERROR] Error instalando Bonjour: {e}")
+            return False
+
+        finally:
+            # Clean up temp installer
+            try:
+                if installer_path.exists():
+                    installer_path.unlink()
+            except Exception:  # noqa: BLE001
+                pass
 
     def _is_windows_vpn_active(self) -> bool:
         if os.name != "nt":
