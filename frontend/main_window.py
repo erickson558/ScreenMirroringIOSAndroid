@@ -120,6 +120,7 @@ class MainWindow:
         self._embedded_window_hwnd: int | None = None
         self._embedded_original_style: int | None = None
         self._detached_window_hwnd: int | None = None
+        self._window_state = "embedded"  # embedded, detached, or fullscreen
 
         self._build_ui()
         self._refresh_bind_targets(log_change=False)
@@ -282,15 +283,15 @@ class MainWindow:
             command=self._take_snapshot,
         )
         self._btn_snapshot.pack(side="left", padx=(8, 0))
-        self._btn_detach_window = ttk.Button(
+        self._btn_window_state = ttk.Button(
             top,
             text=self._tr("btn_detach_window"),
             underline=0,
             style="Glass.TButton",
-            command=self._detach_window,
+            command=self._toggle_window_state,
             state="disabled",
         )
-        self._btn_detach_window.pack(side="left", padx=(8, 0))
+        self._btn_window_state.pack(side="left", padx=(8, 0))
         self._btn_record = ttk.Button(
             top,
             text=self._tr("btn_record"),
@@ -1403,7 +1404,8 @@ class MainWindow:
                     self._resize_embedded_window()
                     self._preview_overlay.place_forget()
                     self._set_preview_hint(self._tr("preview_hint_embedded"))
-                    self._btn_detach_window.configure(state="normal")
+                    self._window_state = "embedded"
+                    self._update_window_state_button()
                     return
             except (AttributeError, OSError):
                 pass
@@ -1531,11 +1533,12 @@ class MainWindow:
 
         self._embedded_window_hwnd = hwnd
         self._embedded_original_style = original_style
+        self._window_state = "embedded"
         self._preview_overlay.place_forget()
         # Preview tab was removed - no tab selection needed
         # self._content_tabs.select(self._preview_tab)
         self._resize_embedded_window()
-        self._btn_detach_window.configure(state="normal")
+        self._update_window_state_button()
         return True
 
     def _resize_embedded_window(self) -> None:
@@ -1577,8 +1580,26 @@ class MainWindow:
         SWP_NOACTIVATE = 0x0010
         user32.SetWindowPos(hwnd, 0, x, y, width, height, SWP_NOZORDER | SWP_NOACTIVATE)
 
+    def _toggle_window_state(self) -> None:
+        """Toggle between embedded and detached window states."""
+        if self._window_state == "embedded":
+            self._detach_window()
+        elif self._window_state == "detached":
+            self._attach_window()
+
+    def _update_window_state_button(self) -> None:
+        """Update button text based on current window state."""
+        if self._window_state == "embedded" and self._embedded_window_hwnd is not None:
+            self._btn_window_state.configure(text=self._tr("btn_detach_window"))
+            self._btn_window_state.configure(state="normal")
+        elif self._window_state == "detached" and self._detached_window_hwnd is not None:
+            self._btn_window_state.configure(text=self._tr("btn_attach_window"))
+            self._btn_window_state.configure(state="normal")
+        else:
+            self._btn_window_state.configure(state="disabled")
+
     def _detach_window(self) -> None:
-        """Detach the embedded window and show it as an independent fullscreen window."""
+        """Detach the embedded window and show it as an independent floating window."""
         if os.name != "nt":
             return
         
@@ -1591,18 +1612,37 @@ class MainWindow:
             if not user32.IsWindow(hwnd):
                 return
             
-            # Simply move window to fullscreen without changing style
-            # Keep it as popup to maintain stability with GStreamer
+            # Show as floating window with iPhone-like dimensions (540x960)
+            # Position it next to the main window
             screen_width = user32.GetSystemMetrics(0)  # SM_CXSCREEN
             screen_height = user32.GetSystemMetrics(1)  # SM_CYSCREEN
+            window_width = 540
+            window_height = 960
+            
+            # Position to the right of main window, centered vertically
+            try:
+                main_x = self._root.winfo_rootx()
+                main_y = self._root.winfo_rooty()
+                main_width = self._root.winfo_width()
+                x = main_x + main_width + 20
+                y = max(0, (screen_height - window_height) // 2)
+            except:
+                # Fallback: center on screen
+                x = (screen_width - window_width) // 2
+                y = (screen_height - window_height) // 2
+            
+            # Keep window size within screen bounds
+            if x + window_width > screen_width:
+                x = max(0, screen_width - window_width - 20)
             
             SWP_NOZORDER = 0x0004
-            user32.SetWindowPos(hwnd, 0, 0, 0, screen_width, screen_height, SWP_NOZORDER)
+            user32.SetWindowPos(hwnd, 0, x, y, window_width, window_height, SWP_NOZORDER)
             user32.ShowWindow(hwnd, 1)  # SW_NORMAL
             user32.SetForegroundWindow(hwnd)  # Bring to focus
             
             # Save hwnd for recording purposes
             self._detached_window_hwnd = hwnd
+            self._window_state = "detached"
             
             # Clear embedded references but keep running
             self._embedded_window_hwnd = None
@@ -1612,12 +1652,46 @@ class MainWindow:
                 self._embed_retry_after_id = None
             self._embed_retry_left = 0
             
-            self._append_log("[PISTA] Ventana de iPhone desacoplada y mostrada en pantalla completa.")
-            self._btn_detach_window.configure(state="disabled")
+            self._append_log("[PISTA] Ventana de iPhone desacoplada como ventana flotante.")
+            self._update_window_state_button()
             self._set_preview_hint(self._tr("preview_hint_wait_stream"))
             self._preview_overlay.place(relx=0.5, rely=0.5, anchor="center")
         except Exception as e:
             self._append_log(f"[ERROR] No se pudo desacoplar la ventana: {e}")
+
+    def _attach_window(self) -> None:
+        """Re-attach the floating window back to the preview panel."""
+        if os.name != "nt":
+            return
+        
+        hwnd = self._detached_window_hwnd
+        if hwnd is None:
+            return
+        
+        try:
+            user32 = ctypes.windll.user32
+            if not user32.IsWindow(hwnd):
+                return
+            
+            # Reposition to embed back in preview panel
+            x = self._preview_host_frame.winfo_rootx()
+            y = self._preview_host_frame.winfo_rooty()
+            width = max(self._preview_host_frame.winfo_width(), 300)
+            height = max(self._preview_host_frame.winfo_height(), 540)
+            
+            SWP_NOZORDER = 0x0004
+            SWP_NOACTIVATE = 0x0010
+            user32.SetWindowPos(hwnd, 0, x, y, width, height, SWP_NOZORDER | SWP_NOACTIVATE)
+            
+            # Restore embedded state
+            self._embedded_window_hwnd = hwnd
+            self._detached_window_hwnd = None
+            self._window_state = "embedded"
+            
+            self._append_log("[PISTA] Ventana de iPhone acoplada de nuevo al panel de preview.")
+            self._update_window_state_button()
+        except Exception as e:
+            self._append_log(f"[ERROR] No se pudo acoplar la ventana: {e}")
 
     def _release_embedded_window(self) -> None:
         if self._embed_retry_after_id is not None:
@@ -1625,9 +1699,10 @@ class MainWindow:
             self._embed_retry_after_id = None
         self._embed_retry_left = 0
 
-        hwnd = self._embedded_window_hwnd
+        hwnd = self._embedded_window_hwnd or self._detached_window_hwnd
         self._embedded_window_hwnd = None
         self._detached_window_hwnd = None
+        self._window_state = "embedded"
 
         if os.name == "nt" and hwnd is not None:
             try:
@@ -1641,7 +1716,7 @@ class MainWindow:
                 pass
         self._preview_overlay.place(relx=0.5, rely=0.5, anchor="center")
         self._set_preview_hint(self._tr("preview_hint_wait_stream"))
-        self._btn_detach_window.configure(state="disabled")
+        self._update_window_state_button()
 
     def _set_preview_hint(self, message: str) -> None:
         self._preview_hint_var.set(message)
