@@ -313,9 +313,43 @@ class UxPlayService:
         runtime_args: list[str],
         preferred_interface_alias: str | None = None,
     ) -> list[tuple[str, list[str], str | None]]:
-        """Build minimal launch plan - single instance for maximum compatibility."""
-        # Use minimal configuration: just receiver name and args
-        # Don't launch multiple instances per interface - keep it simple
+        """Build launch plans taking network interfaces into account.
+
+        When a preferred interface alias is provided (via the GUI) we try to
+        bind the receiver instance to that NIC by specifying its MAC address
+        (-m). If no explicit preference is given we automatically select the
+        first non-VPN adapter detected on the machine so that the receiver
+        uses the LAN/Wi-Fi interface instead of a VPN.  In the rare case that
+        no adapters are available, we fall back to running a single instance
+        without explicit binding.
+        """
+        adapters = self.list_available_interfaces()
+
+        # helper to build plan tuple with optional hint
+        def plan(name: str, args: list[str], hint: str | None = None) -> tuple[str, list[str], str | None]:
+            return (name, args, hint)
+
+        if adapters:
+            # try user-specified interface first
+            if preferred_interface_alias:
+                sel = self._select_preferred_adapter(adapters, preferred_interface_alias)
+                if sel:
+                    iface_name, mac = sel
+                    # explicit user selection
+                    return [plan(f"{receiver_name} [{iface_name}]", runtime_args + ["-m", mac])]
+            # no explicit preference, pick first non-vpn
+            for iface_name, mac in adapters:
+                if "vpn" not in iface_name.lower():
+                    hint = f"[PISTA] Enlazando receptor a interfaz {iface_name} (MAC {mac}) por defecto."
+                    return [plan(f"{receiver_name} [{iface_name}]", runtime_args + ["-m", mac], hint)]
+            # fallback to first adapter if all look like VPN interfaces
+            iface_name, mac = adapters[0]
+            hint = (
+                f"[PISTA] Enlazando receptor a interfaz {iface_name} (MAC {mac}) como único adaptador disponible."
+            )
+            return [plan(f"{receiver_name} [{iface_name}]", runtime_args + ["-m", mac], hint)]
+
+        # no adapters discovered; continue with simplest plan
         return [(receiver_name, runtime_args, None)]
 
     def _terminate_stale_uxplay_instances(self, uxplay_path: Path) -> int:
