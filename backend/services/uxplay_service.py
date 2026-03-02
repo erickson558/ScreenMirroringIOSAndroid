@@ -449,11 +449,10 @@ class UxPlayService:
         if "-nc" in lowered:
             return runtime_args, None
         # Add both -nc (keep window) and -async (non-blocking window creation)
-        # Also add timeout for connection stability
-        new_args = [*runtime_args, "-nc", "-async", "-t", "60"]
+            new_args = [*runtime_args, "-nc", "-async"]
         return (
             new_args,
-            "[PISTA] Se activo '-nc -async -t 60' para ventana inmediata y conexion estable.",
+                "[PISTA] Se activo '-nc -async' para que la ventana aparezca inmediatamente sin bloqueos.",
         )
 
     def _has_explicit_window_size_arg(self, runtime_args: list[str]) -> bool:
