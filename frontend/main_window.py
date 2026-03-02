@@ -275,6 +275,14 @@ class MainWindow:
             command=self._toggle_receiver,
         )
         self._btn_receiver.pack(side="left")
+        self._btn_repair_network = ttk.Button(
+            top,
+            text=self._tr("btn_repair_network"),
+            underline=0,
+            style="Glass.TButton",
+            command=self._on_repair_network,
+        )
+        self._btn_repair_network.pack(side="left", padx=(8, 0))
         self._btn_snapshot = ttk.Button(
             top,
             text=self._tr("btn_snapshot"),
@@ -850,6 +858,25 @@ class MainWindow:
 
         for line in diagnostics:
             self._append_log(line)
+
+    def _on_repair_network(self) -> None:
+        if self._is_busy():
+            self._set_status(self._tr("status_wait_current_operation"), "warning")
+            return
+
+        action_label = self._tr("action_repair_network")
+
+        def repair() -> None:
+            self._append_log(self._tr("action_repair_network"))
+            ok = self._controller.repair_airplay_network()
+            if not ok:
+                raise RuntimeError(self._tr("error_repair_network_failed"))
+
+        self._run_in_background(
+            action_label=action_label,
+            fn=repair,
+            success_status=self._tr("status_repair_network_done"),
+        )
 
     def _install_autosave(self) -> None:
         vars_ = (
@@ -1921,6 +1948,7 @@ class MainWindow:
         state = "disabled" if is_busy else "normal"
 
         self._btn_receiver.configure(state=state)
+        self._btn_repair_network.configure(state=state)
         self._btn_snapshot.configure(state=state)
         self._btn_record.configure(state=state)
         self._btn_browse.configure(state=state)

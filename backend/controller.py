@@ -80,6 +80,10 @@ class AppController:
         """Attempt to automatically install Bonjour on Windows."""
         return self._service.install_bonjour()
 
+    def repair_airplay_network(self) -> bool:
+        """Run a quick repair sequence for AirPlay discovery issues."""
+        return self._service.repair_airplay_connectivity()
+
     def take_snapshot(
         self,
         uxplay_path: Path,

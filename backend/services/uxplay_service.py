@@ -105,6 +105,9 @@ class UxPlayService:
             runtime_args = [arg for arg in runtime_args if arg.lower() != "-nh"]
             if not append_hostname_suffix:
                 runtime_args = ["-nh", *runtime_args]
+            runtime_args, hint = self._strip_unsupported_runtime_args(runtime_args)
+            if hint:
+                startup_hints.append(hint)
             preferred_alias = self._normalize_interface_alias(preferred_interface_alias)
 
             self._try_prioritize_interface_metrics()
@@ -148,7 +151,6 @@ class UxPlayService:
             # startup window state; forcing SW_HIDE can prevent renderer window visibility.
             startupinfo = None
             environment = self._build_runtime_env(normalized_path)
-
             try:
                 for instance_name, instance_args, instance_hint in launch_plans:
                     command = [str(normalized_path), "-n", instance_name, *instance_args]
@@ -220,6 +222,39 @@ class UxPlayService:
             with self._lock:
                 self._reader_threads[self._process_key(process)] = reader
             reader.start()
+
+    def _strip_unsupported_runtime_args(self, runtime_args: list[str]) -> tuple[list[str], str | None]:
+        cleaned: list[str] = []
+        removed_any = False
+        index = 0
+        while index < len(runtime_args):
+            token = runtime_args[index]
+            low = token.lower()
+
+            if low == "-t":
+                removed_any = True
+                index += 1
+                if index < len(runtime_args):
+                    next_token = runtime_args[index]
+                    if not str(next_token).strip().startswith("-"):
+                        index += 1
+                continue
+
+            if low.startswith("-t") and len(low) > 2:
+                removed_any = True
+                index += 1
+                continue
+
+            cleaned.append(token)
+            index += 1
+
+        if not removed_any:
+            return runtime_args, None
+
+        return (
+            cleaned,
+            "[PISTA] Se removio parametro no soportado '-t' para compatibilidad con UxPlay 1.68.",
+        )
 
     def stop(self) -> None:
         with self._lock:
@@ -449,10 +484,10 @@ class UxPlayService:
         if "-nc" in lowered:
             return runtime_args, None
         # Add both -nc (keep window) and -async (non-blocking window creation)
-            new_args = [*runtime_args, "-nc", "-async"]
+        new_args = [*runtime_args, "-nc", "-async"]
         return (
             new_args,
-                "[PISTA] Se activo '-nc -async' para que la ventana aparezca inmediatamente sin bloqueos.",
+            "[PISTA] Se activo '-nc -async' para que la ventana aparezca inmediatamente sin bloqueos.",
         )
 
     def _has_explicit_window_size_arg(self, runtime_args: list[str]) -> bool:
@@ -1245,6 +1280,102 @@ class UxPlayService:
                 "https://support.apple.com/downloads/bonjour"
             )
         return hints
+
+    def repair_airplay_connectivity(self) -> bool:
+        """Run a best-effort local repair workflow for AirPlay discovery on Windows."""
+        if os.name != "nt":
+            self._emit_log("[ADVERTENCIA] Reparacion de red AirPlay solo disponible en Windows.")
+            return False
+
+        self._emit_log("[PISTA] Iniciando reparacion rapida de red AirPlay...")
+
+        self._try_prioritize_interface_metrics()
+        self._restart_bonjour_service()
+        self._flush_dns_cache()
+
+        restart_request: _StartRequest | None
+        with self._lock:
+            restart_request = self._last_start_request
+            has_running = bool(self._processes)
+
+        if has_running and restart_request is not None:
+            self._emit_log("[PISTA] Reiniciando receptor para republicar anuncio AirPlay...")
+            self.stop()
+            time.sleep(0.8)
+            try:
+                self.start(
+                    uxplay_path=restart_request.uxplay_path,
+                    receiver_name=restart_request.receiver_name,
+                    extra_args=list(restart_request.extra_args),
+                    append_hostname_suffix=restart_request.append_hostname_suffix,
+                    preferred_interface_alias=restart_request.preferred_interface_alias,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._emit_log(f"[ADVERTENCIA] No se pudo reiniciar receptor tras reparacion: {exc}")
+
+        for line in self.get_network_diagnostics():
+            self._emit_log(line)
+
+        self._emit_log("[PISTA] Reparacion de red AirPlay finalizada.")
+        return True
+
+    def _restart_bonjour_service(self) -> None:
+        powershell_script = (
+            "$ErrorActionPreference='SilentlyContinue';"
+            "$svc = Get-Service -Name 'Bonjour Service' -ErrorAction SilentlyContinue;"
+            "if ($null -eq $svc) { Write-Output 'BONJOUR_MISSING'; exit 0 };"
+            "try { Restart-Service -Name 'Bonjour Service' -Force -ErrorAction Stop;"
+            "Write-Output 'BONJOUR_RESTARTED'; exit 0 } catch {}"
+            "try { Start-Service -Name 'Bonjour Service' -ErrorAction Stop;"
+            "Write-Output 'BONJOUR_STARTED'; exit 0 } catch {}"
+            "Write-Output 'BONJOUR_FAILED';"
+        )
+
+        try:
+            completed = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", powershell_script],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=8,
+                stdin=subprocess.DEVNULL,
+                creationflags=self._creationflags(),
+                startupinfo=self._startupinfo(),
+            )
+        except (OSError, subprocess.SubprocessError):
+            self._emit_log("[ADVERTENCIA] No se pudo verificar/reiniciar Bonjour Service.")
+            return
+
+        raw = "\n".join((completed.stdout or "").splitlines()).upper()
+        if "BONJOUR_RESTARTED" in raw:
+            self._emit_log("[PISTA] Bonjour Service reiniciado correctamente.")
+        elif "BONJOUR_STARTED" in raw:
+            self._emit_log("[PISTA] Bonjour Service iniciado correctamente.")
+        elif "BONJOUR_MISSING" in raw:
+            self._emit_log("[ADVERTENCIA] Bonjour Service no esta instalado.")
+        else:
+            self._emit_log("[ADVERTENCIA] No se pudo reiniciar Bonjour Service (posible falta de permisos).")
+
+    def _flush_dns_cache(self) -> None:
+        try:
+            completed = subprocess.run(
+                ["ipconfig", "/flushdns"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=8,
+                stdin=subprocess.DEVNULL,
+                creationflags=self._creationflags(),
+                startupinfo=self._startupinfo(),
+            )
+        except (OSError, subprocess.SubprocessError):
+            self._emit_log("[ADVERTENCIA] No se pudo limpiar cache DNS local.")
+            return
+
+        if completed.returncode == 0:
+            self._emit_log("[PISTA] Cache DNS local limpiada.")
+        else:
+            self._emit_log("[ADVERTENCIA] No se pudo limpiar cache DNS local (sin privilegios o politica).")
 
     def _check_bonjour_service(self) -> bool:
         """Check if Bonjour/mDNS service is available on Windows."""
