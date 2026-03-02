@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 from ctypes import wintypes
 from dataclasses import dataclass
+import json
 import os
 from pathlib import Path
 import shutil
@@ -549,44 +550,36 @@ class UxPlayService:
         )
 
     def _resolve_windows_active_adapters(self) -> list[tuple[str, str]]:
+        adapters = self._query_windows_adapters(physical_only=True)
+        if not adapters:
+            adapters = self._query_windows_adapters(physical_only=False)
+
+        normalized: list[tuple[str, str]] = []
+        seen_macs: set[str] = set()
+        for adapter_name, raw_mac in adapters:
+            clean_name = (adapter_name or "").strip() or "Adaptador"
+            if self._is_excluded_adapter_name(clean_name):
+                continue
+            mac = self._normalize_mac(raw_mac)
+            if not mac or mac in seen_macs:
+                continue
+            seen_macs.add(mac)
+            normalized.append((clean_name, mac))
+
+        normalized.sort(key=lambda item: self._adapter_priority(item[0]))
+        return normalized
+
+    def _query_windows_adapters(self, physical_only: bool) -> list[tuple[str, str]]:
+        if physical_only:
+            adapter_source = "Get-NetAdapter -Physical -ErrorAction SilentlyContinue"
+        else:
+            adapter_source = "Get-NetAdapter -ErrorAction SilentlyContinue"
+
         powershell_script = (
             "$ErrorActionPreference='SilentlyContinue';"
-            "$selected = New-Object System.Collections.Generic.List[Object];"
-            "function Add-Adapter([object]$adapter) {"
-            "  if ($null -eq $adapter) { return };"
-            "  if ($adapter.Status -ne 'Up') { return };"
-            "  if ([string]::IsNullOrWhiteSpace($adapter.MacAddress)) { return };"
-            "  if ($adapter.Name -like 'vEthernet*') { return };"
-            "  if ($adapter.InterfaceDescription -like '*Hyper-V*') { return };"
-            "  $name = ($adapter.Name + ' ' + $adapter.InterfaceDescription).ToLowerInvariant();"
-            "  if ($name -match 'vpn|wireguard|openvpn|checkpoint|anyconnect|fortinet|tailscale|zerotier|tap|tun|virtualbox|vmware|hyper-v|loopback') { return };"
-            "  foreach ($item in $selected) {"
-            "    if ($item.ifIndex -eq $adapter.ifIndex) { return };"
-            "  };"
-            "  $selected.Add($adapter) | Out-Null;"
-            "};"
-            "$routes = Get-NetRoute -DestinationPrefix '0.0.0.0/0' | "
-            "Sort-Object -Property RouteMetric, InterfaceMetric;"
-            "foreach ($route in $routes) {"
-            "  $adapter = Get-NetAdapter -InterfaceIndex $route.InterfaceIndex;"
-            "  Add-Adapter $adapter;"
-            "};"
-            "$all = Get-NetAdapter | "
-            "Sort-Object -Property @{Expression={ if ($_.HardwareInterface) { 0 } else { 1 } }}, ifIndex;"
-            "foreach ($adapter in $all) {"
-            "  Add-Adapter $adapter;"
-            "};"
-            "foreach ($adapter in $selected) {"
-            "  Write-Output ($adapter.Name + '|' + $adapter.MacAddress);"
-            "};"
-            "if ($selected.Count -eq 0) {"
-            "  $fallback = Get-NetAdapter | Where-Object {"
-            "    $_.Status -eq 'Up' -and -not [string]::IsNullOrWhiteSpace($_.MacAddress)"
-            "  } | Select-Object -First 1;"
-            "  if ($null -ne $fallback) {"
-            "    Write-Output ($fallback.Name + '|' + $fallback.MacAddress);"
-            "  }"
-            "};"
+            f"$adapters = {adapter_source} | Where-Object {{ $_.Status -eq 'Up' -and -not [string]::IsNullOrWhiteSpace($_.MacAddress) }};"
+            "if ($null -eq $adapters -or @($adapters).Count -eq 0) { return };"
+            "$adapters | Select-Object Name, MacAddress | ConvertTo-Json -Compress"
         )
 
         try:
@@ -595,7 +588,7 @@ class UxPlayService:
                 capture_output=True,
                 text=True,
                 check=False,
-                timeout=8,
+                timeout=15,
                 stdin=subprocess.DEVNULL,
                 creationflags=self._creationflags(),
                 startupinfo=self._startupinfo(),
@@ -606,18 +599,29 @@ class UxPlayService:
         if completed.returncode not in (0, 1):
             return []
 
-        rows = [line.strip() for line in (completed.stdout or "").splitlines() if "|" in line]
-        adapters: list[tuple[str, str]] = []
-        seen_macs: set[str] = set()
-        for row in rows:
-            adapter_name, raw_mac = row.split("|", 1)
-            mac = self._normalize_mac(raw_mac)
-            if not mac or mac in seen_macs:
+        payload = (completed.stdout or "").strip()
+        if not payload:
+            return []
+
+        try:
+            parsed = json.loads(payload)
+        except json.JSONDecodeError:
+            return []
+
+        if isinstance(parsed, dict):
+            parsed = [parsed]
+        if not isinstance(parsed, list):
+            return []
+
+        result: list[tuple[str, str]] = []
+        for item in parsed:
+            if not isinstance(item, dict):
                 continue
-            seen_macs.add(mac)
-            adapters.append((adapter_name.strip() or "Adaptador", mac))
-        adapters.sort(key=lambda item: self._adapter_priority(item[0]))
-        return adapters
+            name = str(item.get("Name") or "").strip()
+            mac = str(item.get("MacAddress") or "").strip()
+            if name and mac:
+                result.append((name, mac))
+        return result
 
     def _adapter_priority(self, adapter_name: str) -> tuple[int, str]:
         low = adapter_name.lower()
