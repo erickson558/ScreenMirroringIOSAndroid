@@ -1282,35 +1282,25 @@ class MainWindow:
 
         capture_window_source = self._capture_title_var.get().strip()
         capture_region: tuple[int, int, int, int] | None = None
-        
-        if os.name == "nt" and (self._embedded_window_hwnd is not None or self._detached_window_hwnd is not None):
-            # determine capture region; prefer querying the actual uxplay window rect
+
+        if os.name == "nt":
             hwnd_to_capture = self._embedded_window_hwnd or self._detached_window_hwnd
-            try:
-                rect = wintypes.RECT()
-                if ctypes.windll.user32.GetWindowRect(hwnd_to_capture, ctypes.byref(rect)):
-                    width = rect.right - rect.left
-                    height = rect.bottom - rect.top
-                    capture_region = (rect.left, rect.top, width, height)
-                    if self._detached_window_hwnd:
-                        self._append_log("[PISTA] Grabacion usando ventana desacoplada.")
-                    else:
-                        self._append_log("[PISTA] Grabacion usando region obtenida desde hwnd.")
+            if hwnd_to_capture:
+                # Prefer true window capture via HWND so recording follows the
+                # real UxPlay window and avoids static desktop crops.
+                capture_window_source = f"hwnd=0x{hwnd_to_capture:X}"
+                if self._detached_window_hwnd:
+                    self._append_log("[PISTA] Grabacion en modo ventana (desacoplada) via HWND.")
                 else:
-                    raise OSError("GetWindowRect falló")
-            except Exception:
-                # fallback to preview frame coordinates (should now always be mapped)
+                    self._append_log("[PISTA] Grabacion en modo ventana integrada via HWND.")
+            elif not capture_window_source:
+                # Last fallback: fixed desktop region over preview panel.
                 x = self._preview_host_frame.winfo_rootx()
                 y = self._preview_host_frame.winfo_rooty()
                 w = self._preview_host_frame.winfo_width()
                 h = self._preview_host_frame.winfo_height()
                 capture_region = (x, y, w, h)
                 self._append_log("[PISTA] Grabacion usando region del frame de preview (fallback).")
-        else:
-            if self._embedded_window_hwnd:
-                capture_window_source = f"hwnd=0x{self._embedded_window_hwnd:X}"
-            elif self._detached_window_hwnd:
-                capture_window_source = f"hwnd=0x{self._detached_window_hwnd:X}"
 
         # ensure region dimensions are sane before trying to record
         if capture_region is not None:
@@ -1319,9 +1309,8 @@ class MainWindow:
                 self._append_log("[ERROR] Region de captura invalida (demasiado pequena)")
                 return
 
-        # Use window tracking mode when we have a valid window handle/source;
-        # this enables automatic window motion tracking during recording so
-        # the capture follows the window if user moves it.
+        # Use window tracking mode when we have a valid window source; this
+        # enables automatic motion tracking so capture follows moved windows.
         use_window_tracking = (
             capture_window_source.startswith("hwnd=") or
             capture_window_source.startswith("title=")
