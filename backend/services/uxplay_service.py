@@ -28,7 +28,7 @@ class _StartRequest:
 
 
 class UxPlayService:
-    _DEFAULT_WINDOW_SIZE = "1280x720@60"
+    _DEFAULT_WINDOW_SIZE = "960x540@30"
 
     def __init__(
         self,
@@ -449,10 +449,11 @@ class UxPlayService:
         if "-nc" in lowered:
             return runtime_args, None
         # Add both -nc (keep window) and -async (non-blocking window creation)
-        new_args = [*runtime_args, "-nc", "-async"]
+        # Also add timeout for connection stability
+        new_args = [*runtime_args, "-nc", "-async", "-t", "60"]
         return (
             new_args,
-            "[PISTA] Se activo '-nc -async' para que la ventana aparezca inmediatamente sin bloqueos.",
+            "[PISTA] Se activo '-nc -async -t 60' para ventana inmediata y conexion estable.",
         )
 
     def _has_explicit_window_size_arg(self, runtime_args: list[str]) -> bool:

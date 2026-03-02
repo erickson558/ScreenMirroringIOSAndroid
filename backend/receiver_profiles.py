@@ -46,10 +46,18 @@ ULTRA_PERFORMANCE_PROFILE = ReceiverProfile(
     ),
 )
 
+PERFORMANCE_PROFILE = ReceiverProfile(
+    key="performance",
+    label="Rendimiento optimizado (FPS)",
+    description="Resolución reducida 640x480 @30 FPS para evitar lagging. Ideal si tienes bajo FPS.",
+    args=("-vsync", "no", "-fps", "30", "-s", "640x480@30", "-al", "0.08"),
+)
+
 ALL_PROFILES: tuple[ReceiverProfile, ...] = (
     COMPATIBILITY_PROFILE,
     LOW_LATENCY_PROFILE,
     ULTRA_PERFORMANCE_PROFILE,
+    PERFORMANCE_PROFILE,
     BALANCED_PROFILE,
 )
 

@@ -1612,6 +1612,22 @@ class MainWindow:
             if not user32.IsWindow(hwnd):
                 return
             
+            # Make window movable by adding WS_CAPTION style
+            GWL_STYLE = -16
+            WS_CAPTION = 0x00C00000
+            WS_THICKFRAME = 0x00040000
+            WS_SYSMENU = 0x00080000
+            try:
+                current_style = user32.GetWindowLongW(hwnd, GWL_STYLE)
+                # Add caption, thick frame, and system menu to make it movable and resizable
+                new_style = current_style | WS_CAPTION | WS_THICKFRAME | WS_SYSMENU
+                user32.SetWindowLongW(hwnd, GWL_STYLE, new_style)
+                # Force window to recalculate layout with new style
+                SWP_FRAMECHANGED = 0x0020
+                user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, SWP_FRAMECHANGED)
+            except Exception:
+                pass  # If style change fails, continue without it
+            
             # Show as floating window with iPhone-like dimensions (540x960)
             # Position it next to the main window
             screen_width = user32.GetSystemMetrics(0)  # SM_CXSCREEN
@@ -1652,7 +1668,7 @@ class MainWindow:
                 self._embed_retry_after_id = None
             self._embed_retry_left = 0
             
-            self._append_log("[PISTA] Ventana de iPhone desacoplada como ventana flotante.")
+            self._append_log("[PISTA] Ventana de iPhone desacoplada como ventana flotante (movible).")
             self._update_window_state_button()
             self._set_preview_hint(self._tr("preview_hint_wait_stream"))
             self._preview_overlay.place(relx=0.5, rely=0.5, anchor="center")
