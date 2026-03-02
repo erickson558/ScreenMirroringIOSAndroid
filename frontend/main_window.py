@@ -119,6 +119,7 @@ class MainWindow:
         self._embed_retry_left = 0
         self._embedded_window_hwnd: int | None = None
         self._embedded_original_style: int | None = None
+        self._detached_window_hwnd: int | None = None
 
         self._build_ui()
         self._refresh_bind_targets(log_change=False)
@@ -1209,15 +1210,19 @@ class MainWindow:
         capture_window_source = self._capture_title_var.get().strip()
         capture_region: tuple[int, int, int, int] | None = None
         
-        if os.name == "nt" and self._embedded_window_hwnd is not None:
+        if os.name == "nt" and (self._embedded_window_hwnd is not None or self._detached_window_hwnd is not None):
             # determine capture region; prefer querying the actual uxplay window rect
+            hwnd_to_capture = self._embedded_window_hwnd or self._detached_window_hwnd
             try:
                 rect = wintypes.RECT()
-                if ctypes.windll.user32.GetWindowRect(self._embedded_window_hwnd, ctypes.byref(rect)):
+                if ctypes.windll.user32.GetWindowRect(hwnd_to_capture, ctypes.byref(rect)):
                     width = rect.right - rect.left
                     height = rect.bottom - rect.top
                     capture_region = (rect.left, rect.top, width, height)
-                    self._append_log("[PISTA] Grabacion usando region obtenida desde hwnd.")
+                    if self._detached_window_hwnd:
+                        self._append_log("[PISTA] Grabacion usando ventana desacoplada.")
+                    else:
+                        self._append_log("[PISTA] Grabacion usando region obtenida desde hwnd.")
                 else:
                     raise OSError("GetWindowRect falló")
             except Exception:
@@ -1229,7 +1234,10 @@ class MainWindow:
                 capture_region = (x, y, w, h)
                 self._append_log("[PISTA] Grabacion usando region del frame de preview (fallback).")
         else:
-            capture_window_source = f"hwnd=0x{self._embedded_window_hwnd:X}" if self._embedded_window_hwnd else capture_window_source
+            if self._embedded_window_hwnd:
+                capture_window_source = f"hwnd=0x{self._embedded_window_hwnd:X}"
+            elif self._detached_window_hwnd:
+                capture_window_source = f"hwnd=0x{self._detached_window_hwnd:X}"
 
         # ensure region dimensions are sane before trying to record
         if capture_region is not None:
@@ -1601,6 +1609,9 @@ class MainWindow:
             user32.ShowWindow(hwnd, 1)  # SW_NORMAL
             user32.SetForegroundWindow(hwnd)  # Bring to focus
             
+            # Save hwnd for recording purposes
+            self._detached_window_hwnd = hwnd
+            
             # Clear embedded references but keep running
             self._embedded_window_hwnd = None
             self._embedded_original_style = None
@@ -1624,6 +1635,7 @@ class MainWindow:
 
         hwnd = self._embedded_window_hwnd
         self._embedded_window_hwnd = None
+        self._detached_window_hwnd = None
 
         if os.name == "nt" and hwnd is not None:
             try:
