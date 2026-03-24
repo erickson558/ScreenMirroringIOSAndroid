@@ -1,26 +1,29 @@
-﻿# ScreenMirrorIOSAndroid (Python)
+# ScreenMirrorIOSAndroid (Python)
 
-AplicaciÃ³n de escritorio en Python con arquitectura separada (`backend`/`frontend`) para espejo de pantalla con iPhone (AirPlay/UxPlay) y Android (ProyecciÃ³n inalÃ¡mbrica/Miracast).
+Version actual: `V0.0.84`
+
+Aplicacion de escritorio en Python con arquitectura separada (`backend`/`frontend`) para espejo de pantalla con iPhone (AirPlay/UxPlay) y Android (Proyeccion inalambrica/Miracast).
 
 ## Funcionalidades
 
-- Interfaz estilo Aero en espaÃ±ol.
+- Interfaz estilo Aero en espanol.
 - Selector de dispositivo con `Radiobutton`: `iPhone` / `Android`.
-- Guardado automÃ¡tico de configuraciÃ³n de la GUI en `config.json`.
+- Guardado automatico de configuracion de la GUI en `config.json`.
 - Atajos de teclado estilo Windows con letra subrayada (`Alt + tecla`).
-- Barra de menÃº (`Archivo`/`Ayuda`) y ventana `Acerca de` con versiÃ³n.
-- Barra de estado para mensajes de la aplicaciÃ³n (sin `messagebox`).
-- Captura de imagen con selecciÃ³n de ruta de guardado.
-- GrabaciÃ³n de video `.mp4`.
-- Perfiles de transmisiÃ³n para estabilidad y menor latencia.
-- Registro en tiempo real con pistas de diagnÃ³stico.
-- Anuncio AirPlay multi-interfaz en Windows (si hay VPN/Wi-Fi/LAN activas, crea una instancia por adaptador).
-- Versionado en `version.json` con incremento automÃ¡tico al compilar.
+- Barra de menu (`Archivo`/`Ayuda`) y ventana `Acerca de` con version.
+- Barra de estado para mensajes de la aplicacion.
+- Captura de imagen con seleccion de ruta de guardado.
+- Grabacion de video `.mp4`.
+- Perfiles de transmision para estabilidad y menor latencia.
+- Registro en tiempo real con pistas de diagnostico.
+- Anuncio AirPlay multi-interfaz en Windows.
+- Diagnostico Android/Miracast con pistas de configuracion de Windows.
+- Versionado en `version.json` con formato `Vx.x.x`.
 - Log en `log.txt` con timestamp.
 
 ## Nota importante
 
-AirPlay/Miracast en este flujo es recepciÃ³n de audio/video. No hay control tÃ¡ctil directo del telÃ©fono desde la ventana.
+AirPlay/Miracast en este flujo es recepcion de audio/video. No hay control tactil directo del telefono desde la ventana.
 
 ## Requisitos
 
@@ -29,7 +32,7 @@ AirPlay/Miracast en este flujo es recepciÃ³n de audio/video. No hay control t�
   - `tools/uxplay/bin/uxplay.exe`
   - `tools/uxplay/lib/...`
 
-## EjecuciÃ³n en desarrollo
+## Ejecucion en desarrollo
 
 ```powershell
 python -m venv .venv
@@ -40,8 +43,16 @@ python app.py
 
 ## Modo Android y Miracast
 
-- Al pulsar `Abrir proyecciÃ³n Android`, la app abre la configuraciÃ³n de proyecciÃ³n de Windows.
-- Si el equipo no admite recibir Miracast, Android no encontrarÃ¡ el receptor. La app lo reporta con diagnÃ³stico.
+- Al pulsar `Abrir proyeccion Android`, la app abre la configuracion de proyeccion de Windows.
+- Si el equipo no admite recibir Miracast, Android no encontrara el receptor.
+- Si Samsung no detecta el PC, revisa `Proyeccion en este equipo`, confirma que `Wireless Display` este instalado y verifica que Windows permita la disponibilidad del receptor.
+
+## Validacion rapida
+
+```powershell
+pytest -q
+python scripts\diagnose_network.py
+```
 
 ## Compilar EXE en la misma carpeta del `.py`
 
@@ -51,10 +62,10 @@ python app.py
 
 Resultado:
 
-- `ScreenMirrorIOSAndroid.exe` en la raÃ­z del proyecto (no en `dist`)
-- Ãcono cargado desde `ScreenMirrorIOSAndroid.ico`
-- Runtime `tools/uxplay` embebido en el ejecutable `onefile`
-- Incremento automÃ¡tico de versiÃ³n (`version.json`, +`0.0.1` por compilaciÃ³n)
+- `ScreenMirrorIOSAndroid.exe` en la raiz del proyecto.
+- Icono cargado desde `ScreenMirrorIOSAndroid.ico`.
+- Runtime `tools/uxplay` embebido en el ejecutable `onefile`.
+- Incremento automatico de version en `version.json`.
 
 ## Troubleshooting Git SSL (Windows)
 

@@ -3,15 +3,24 @@
 Advanced network diagnostics for AirPlay discovery on Windows.
 Checks firewall rules, mDNS, and network conditions.
 """
+
 import os
 import socket
 import subprocess
 import sys
-from pathlib import Path
 
 
-def run_cmd(cmd, timeout=5):
-    """Run command and return output."""
+def safe_print(message: object = "") -> None:
+    """Print without crashing on legacy Windows console encodings."""
+    text = str(message)
+    encoding = (getattr(sys.stdout, "encoding", None) or "utf-8").lower()
+    if "utf" not in encoding:
+        text = text.encode("ascii", errors="replace").decode("ascii")
+    print(text)
+
+
+def run_cmd(cmd: str, timeout: int = 8) -> str:
+    """Run command and return merged output."""
     try:
         result = subprocess.run(
             cmd,
@@ -22,146 +31,172 @@ def run_cmd(cmd, timeout=5):
             shell=True,
         )
         return result.stdout + result.stderr
-    except Exception as e:
-        return f"Error: {e}"
+    except Exception as exc:  # noqa: BLE001
+        return f"Error: {exc}"
 
 
-def check_firewall_rules():
-    """Check if UxPlay and mDNS firewall rules exist."""
-    print("\n=== FIREWALL RULES ===")
-    
-    # List all inbound rules
-    output = run_cmd('netsh advfirewall firewall show rule name=all dir=in | findstr /I "uxplay mdns airplay"')
-    if output.strip():
-        print("Found UxPlay/mDNS rules:")
-        print(output)
+def check_firewall_rules() -> None:
+    """Check if app-specific and discovery firewall rules exist."""
+    safe_print("\n=== FIREWALL RULES ===")
+
+    output = run_cmd("netsh advfirewall firewall show rule name=all dir=in", timeout=12)
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    app_rules = [
+        line
+        for line in lines
+        if any(token in line.lower() for token in ("uxplay", "screenmirroriosandroid", "lonelyscreen", "airplay"))
+    ]
+    mdns_rules = [
+        line for line in lines if any(token in line.lower() for token in ("mdns", "bonjour"))
+    ]
+
+    if app_rules:
+        safe_print("Found app-specific inbound rules:")
+        for line in app_rules[:12]:
+            safe_print(f"  {line}")
     else:
-        print("⚠️ No UxPlay/mDNS inbound rules found. This is likely the problem!")
-    
-    # Check current firewall profile
-    profile = run_cmd('netsh advfirewall show currentprofile')
-    print("\nCurrent Firewall Profile:")
-    for line in profile.split('\n'):
-        if any(x in line.lower() for x in ['inbound', 'outbound', 'state']):
-            print(f"  {line.strip()}")
+        safe_print("[WARN] No app-specific inbound rules found for UxPlay/AirPlay.")
+
+    if mdns_rules:
+        safe_print("\nFound generic discovery rules:")
+        for line in mdns_rules[:12]:
+            safe_print(f"  {line}")
+    else:
+        safe_print("\n[WARN] No inbound mDNS/Bonjour rules found.")
+
+    profile = run_cmd("netsh advfirewall show currentprofile")
+    safe_print("\nCurrent Firewall Profile:")
+    for line in profile.splitlines():
+        if any(token in line.lower() for token in ("inbound", "outbound", "state")):
+            safe_print(f"  {line.strip()}")
 
 
-def check_mdns():
+def check_mdns() -> None:
     """Attempt to query mDNS directly."""
-    print("\n=== mDNS TEST ===")
+    safe_print("\n=== mDNS TEST ===")
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         sock.settimeout(2.0)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        
-        # Try to join multicast group
+
         group = socket.inet_aton("224.0.0.251")
         mreq = group + socket.inet_aton("0.0.0.0")
         try:
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-            print("[OK] mDNS multicast group joined successfully")
-        except OSError as e:
-            print(f"[FAIL] Failed to join mDNS multicast group: {e}")
-            print("  -> Firewall or network issue blocking multicast")
+            safe_print("[OK] mDNS multicast group joined successfully")
+        except OSError as exc:
+            safe_print(f"[FAIL] Failed to join mDNS multicast group: {exc}")
+            safe_print("  -> Firewall or network issue blocking multicast")
             sock.close()
             return
-        
-        # Send mDNS query for AirPlay
+
         query = b"\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00"
         for part in ["_airplay", "_tcp", "local"]:
             query += bytes([len(part)]) + part.encode("ascii")
         query += b"\x00\x00\x0c\x00\x01"
-        
+
         sock.sendto(query, ("224.0.0.251", 5353))
-        print("[OK] mDNS query sent")
-        
+        safe_print("[OK] mDNS query sent")
+
         try:
-            data, addr = sock.recvfrom(1024)
-            print(f"[OK] mDNS response received from {addr}")
+            _data, addr = sock.recvfrom(1024)
+            safe_print(f"[OK] mDNS response received from {addr}")
         except socket.timeout:
-            print("[FAIL] No mDNS responses received (timeout)")
-            print("  -> Check if Bonjour/mDNS service is running")
-        
+            safe_print("[FAIL] No mDNS responses received (timeout)")
+            safe_print("  -> Check if Bonjour/mDNS service is running")
+
         sock.close()
-    except Exception as e:
-        print(f"[FAIL] mDNS test failed: {e}")
+    except Exception as exc:  # noqa: BLE001
+        safe_print(f"[FAIL] mDNS test failed: {exc}")
 
 
-def check_network_interfaces():
+def check_network_interfaces() -> None:
     """Check active network interfaces."""
-    print("\n=== NETWORK INTERFACES ===")
-    
-    # Use netsh to list interfaces
-    output = run_cmd('netsh interface show interface')
-    print(output)
-    
-    # Check internet connectivity profiles
+    safe_print("\n=== NETWORK INTERFACES ===")
+
+    output = run_cmd("netsh interface show interface")
+    safe_print(output)
+
     ps_cmd = (
         "$ErrorActionPreference='SilentlyContinue';"
         "Get-NetConnectionProfile | "
         "Select-Object InterfaceAlias,NetworkCategory,IPv4Connectivity | "
         "Format-Table -AutoSize"
     )
-    output = run_cmd(f'powershell -NoProfile -Command "{ps_cmd}"')
-    print("\nNetwork Profiles:")
-    print(output)
+    output = run_cmd(f'powershell -NoProfile -Command "{ps_cmd}"', timeout=12)
+    safe_print("\nNetwork Profiles:")
+    safe_print(output)
 
 
-def check_uxplay_ports():
+def _find_port_bindings(port: int) -> list[str]:
+    output = run_cmd("netstat -ano", timeout=8)
+    matches: list[str] = []
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        local_address = parts[1]
+        if local_address.endswith(f":{port}") or local_address.endswith(f"]:{port}"):
+            matches.append(line)
+    return matches
+
+
+def check_uxplay_ports() -> None:
     """Check if UxPlay ports are listening."""
-    print("\n=== UxPlay PORTS ===")
-    
-    ports = [6000, 6001, 7000, 7001, 7011]
-    
-    for port in ports:
-        output = run_cmd(f'netstat -ano | findstr ":{port}"')
-        if output.strip():
-            print(f"Port {port}: LISTENING")
-            print(f"  {output.strip()}")
+    safe_print("\n=== UxPlay PORTS ===")
+
+    for port in [6000, 6001, 7000, 7001, 7011]:
+        bindings = _find_port_bindings(port)
+        if bindings:
+            safe_print(f"Port {port}: LISTENING")
+            for line in bindings[:4]:
+                safe_print(f"  {line}")
         else:
-            print(f"Port {port}: NOT LISTENING")
+            safe_print(f"Port {port}: NOT LISTENING")
 
 
-def check_bonjour_service():
+def check_bonjour_service() -> bool:
     """Check if Bonjour service is running."""
-    print("\n=== BONJOUR SERVICE ===")
-    
-    # Try both possible names
+    safe_print("\n=== BONJOUR SERVICE ===")
+
     for service_name in ["Bonjour Service", "mDNSResponder"]:
         output = run_cmd(f'sc query "{service_name}" | findstr STATE')
-        if output.strip():
-            if "RUNNING" in output.upper():
-                print(f"✓ {service_name} is RUNNING")
-                return True
-    
-    print("✗ Bonjour Service is NOT RUNNING or not installed")
-    print("  → Install Bonjour from https://support.apple.com/downloads/bonjour")
+        if output.strip() and "RUNNING" in output.upper():
+            safe_print(f"[OK] {service_name} is RUNNING")
+            return True
+
+    safe_print("[FAIL] Bonjour Service is NOT RUNNING or not installed")
+    safe_print("  -> Install Bonjour from https://support.apple.com/downloads/bonjour")
+    return False
 
 
-def main():
+def main() -> None:
     """Run all diagnostics."""
-    print("=" * 60)
-    print("AirPlay Network Discovery Diagnostics")
-    print("=" * 60)
-    
+    safe_print("=" * 60)
+    safe_print("AirPlay Network Discovery Diagnostics")
+    safe_print("=" * 60)
+
     if os.name != "nt":
-        print("This script is for Windows only.")
+        safe_print("This script is for Windows only.")
         sys.exit(1)
-    
+
     check_network_interfaces()
     check_mdns()
     check_firewall_rules()
     check_bonjour_service()
     check_uxplay_ports()
-    
-    print("\n" + "=" * 60)
-    print("SUMMARY: If iPhone cannot detect PC:")
-    print("1. Ensure Bonjour service is running")
-    print("2. Check Windows Firewall inbound rules allow UxPlay")
-    print("3. Verify mDNS multicast is not blocked by network hardware")
-    print("4. Try putting Wi-Fi in Private network mode (not Public)")
-    print("5. Disable Windows Firewall temporarily to test")
-    print("=" * 60)
+
+    safe_print("\n" + "=" * 60)
+    safe_print("SUMMARY: If the phone cannot detect the PC:")
+    safe_print("1. Confirm Bonjour is running for AirPlay.")
+    safe_print("2. Confirm Windows Firewall has app-specific inbound exceptions.")
+    safe_print("3. Verify mDNS multicast is not blocked by the network.")
+    safe_print("4. Switch Wi-Fi to Private mode if it is Public.")
+    safe_print("5. For Android, also verify 'Projecting to this PC' and 'Wireless Display'.")
+    safe_print("=" * 60)
 
 
 if __name__ == "__main__":

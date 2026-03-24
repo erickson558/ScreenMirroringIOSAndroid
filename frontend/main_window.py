@@ -266,7 +266,7 @@ class MainWindow:
 
         header_version = ttk.Label(
             header_wrap,
-            text=f"v{self._app_version}",
+            text=self._app_version,
             style="Version.TLabel",
         )
         header_version.pack(side="right", anchor="e", padx=(8, 0))
@@ -1188,6 +1188,7 @@ class MainWindow:
         capability = str(diag.get("wireless_display_capability", "Unknown")).strip()
         line = str(diag.get("miracast_status_line", "")).strip()
         supported = diag.get("miracast_receiver_supported")
+        needs_manual_verification = False
 
         if capability and capability != "Unknown":
             self._append_log(self._tr("hint_wireless_display", capability=capability))
@@ -1201,14 +1202,22 @@ class MainWindow:
 
         if capability.startswith("Unknown ("):
             self._append_log(f"[ADVERTENCIA] {capability}")
-            self._set_status(capability, "warning")
+            needs_manual_verification = True
 
         if supported is False:
             self._append_log(self._tr("warn_miracast_not_supported"))
             self._set_status(self._tr("status_miracast_not_supported"), "warning")
             return
 
+        if supported is not True:
+            needs_manual_verification = True
+
+        self._append_log(self._tr("hint_android_projection_setup"))
         self._append_log(self._tr("hint_android_ready"))
+        if needs_manual_verification:
+            self._set_status(self._tr("status_android_needs_verification"), "warning")
+            return
+
         self._set_status(self._tr("status_android_ready"), "success")
 
     def _take_snapshot(self) -> None:

@@ -11,6 +11,10 @@ import subprocess
 import socket
 import time
 import sys
+import pytest
+
+
+pytestmark = pytest.mark.skip(reason="Manual integration diagnostic script; run directly if needed.")
 
 
 def test_correct_interface_binding():

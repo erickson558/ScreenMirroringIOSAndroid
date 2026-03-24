@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 
-DEFAULT_VERSION = "0.0.1"
+DEFAULT_VERSION = "V0.0.1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,7 +31,7 @@ def bump_patch_version(version_path: Path) -> VersionInfo:
     current = read_or_create_version(version_path)
     major, minor, patch = _parse_semver(current.version)
     next_info = VersionInfo(
-        version=f"{major}.{minor}.{patch + 1}",
+        version=_format_semver(major, minor, patch + 1),
         updated_at=_utc_timestamp(),
     )
     _write_version_file(version_path, next_info)
@@ -57,7 +57,7 @@ def _read_version_file(version_path: Path) -> VersionInfo | None:
         return None
 
     try:
-        _parse_semver(version)
+        version = _normalize_semver(version)
     except ValueError:
         return None
 
@@ -80,7 +80,11 @@ def _write_version_file(version_path: Path, info: VersionInfo) -> None:
 
 
 def _parse_semver(version: str) -> tuple[int, int, int]:
-    parts = version.split(".")
+    cleaned = version.strip()
+    if cleaned[:1].lower() == "v":
+        cleaned = cleaned[1:]
+
+    parts = cleaned.split(".")
     if len(parts) != 3:
         raise ValueError("Versión inválida")
 
@@ -97,6 +101,14 @@ def _parse_semver(version: str) -> tuple[int, int, int]:
     return major, minor, patch
 
 
-def _utc_timestamp() -> str:
-    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+def _format_semver(major: int, minor: int, patch: int) -> str:
+    return f"V{major}.{minor}.{patch}"
 
+
+def _normalize_semver(version: str) -> str:
+    major, minor, patch = _parse_semver(version)
+    return _format_semver(major, minor, patch)
+
+
+def _utc_timestamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

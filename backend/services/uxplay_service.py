@@ -1276,15 +1276,7 @@ class UxPlayService:
         Returns a list of human-readable hints and warnings useful for
         diagnosing why AirPlay discovery may fail on the current host.
         """
-        hints = self._diagnose_windows_discovery_risks()
-        # Check Bonjour service availability
-        if not self._check_bonjour_service():
-            hints.append(
-                "[ADVERTENCIA] Servicio Bonjour no esta instalado o corriendo. Sin Bonjour, "
-                "el iPhone no puede descubrir el receptor. Instala Bonjour desde Apple: "
-                "https://support.apple.com/downloads/bonjour"
-            )
-        return hints
+        return self._diagnose_windows_discovery_risks()
 
     def repair_airplay_connectivity(self) -> bool:
         """Run a best-effort local repair workflow for AirPlay discovery on Windows."""

@@ -72,7 +72,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "receiver_status_android": "Receptor: modo Android",
         "record_status_active": "Grabación: activa",
         "record_status_inactive": "Grabación: inactiva",
-        "status_ready": "Listo. {app_name} v{version}",
+        "status_ready": "Listo. {app_name} {version}",
         "status_app_closing": "Cerrando aplicación...",
         "version_label": "Versión {version}",
         "app_initialized": "Aplicación inicializada.",
@@ -119,8 +119,15 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "status_install_wireless_display": "Instala 'Wireless Display' en Windows y reinicia.",
         "warn_miracast_not_supported": "[ADVERTENCIA] Este equipo no admite recibir Miracast.",
         "status_miracast_not_supported": "Este equipo no admite recibir Miracast.",
+        "hint_android_projection_setup": (
+            "[PISTA] Si Samsung no detecta este PC, revisa en Windows 'Proyección en este equipo', "
+            "permite disponibilidad y confirma que 'Wireless Display' esté instalado."
+        ),
         "hint_android_ready": "[PISTA] Android activo. Pulsa 'Abrir proyección Android'.",
         "status_android_ready": "Android listo para proyección inalámbrica.",
+        "status_android_needs_verification": (
+            "Android requiere verificación manual en Windows antes de aparecer en el teléfono."
+        ),
         "hint_receiver_stopped_snapshot": "[PISTA] El receptor está detenido. Se capturará el escritorio igualmente.",
         "status_receiver_stopped_snapshot": "Receptor detenido: captura desde escritorio.",
         "title_save_snapshot": "Guardar captura",
@@ -235,7 +242,7 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "receiver_status_android": "Receiver: Android mode",
         "record_status_active": "Recording: active",
         "record_status_inactive": "Recording: idle",
-        "status_ready": "Ready. {app_name} v{version}",
+        "status_ready": "Ready. {app_name} {version}",
         "status_app_closing": "Closing application...",
         "version_label": "Version {version}",
         "app_initialized": "Application initialized.",
@@ -282,8 +289,15 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "status_install_wireless_display": "Install 'Wireless Display' in Windows and restart.",
         "warn_miracast_not_supported": "[WARNING] This PC cannot receive Miracast.",
         "status_miracast_not_supported": "This PC cannot receive Miracast.",
+        "hint_android_projection_setup": (
+            "[HINT] If Samsung still cannot find this PC, review 'Projecting to this PC' in Windows, "
+            "allow availability, and confirm 'Wireless Display' is installed."
+        ),
         "hint_android_ready": "[HINT] Android mode active. Click 'Open Android projection'.",
         "status_android_ready": "Android ready for wireless projection.",
+        "status_android_needs_verification": (
+            "Android needs a manual Windows receiver check before it will show up on the phone."
+        ),
         "hint_receiver_stopped_snapshot": "[HINT] Receiver is stopped. Desktop will still be captured.",
         "status_receiver_stopped_snapshot": "Receiver stopped: capturing desktop.",
         "title_save_snapshot": "Save snapshot",

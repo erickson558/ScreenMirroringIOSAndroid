@@ -4,6 +4,7 @@ Test avanzado para diagnosticar por qué Bonjour NO está anunciando el servicio
 Verifica si UxPlay está registrando su servicio con Bonjour correctamente.
 """
 
+import pytest
 import subprocess
 import socket
 import time
@@ -11,6 +12,8 @@ import struct
 import io
 import sys
 from pathlib import Path
+
+pytestmark = pytest.mark.skip(reason="Manual integration diagnostic script; run directly if needed.")
 
 
 def send_mdns_query():

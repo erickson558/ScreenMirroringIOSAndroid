@@ -4,12 +4,16 @@ Test unitario para validar que UxPlay se ejecuta en modo silent (sin ventana CMD
 y que los puertos están correctamente enlazados a 0.0.0.0 para descubrimiento de red.
 """
 
+import pytest
 import subprocess
 import time
 import threading
 import os
 from pathlib import Path
 import re
+
+
+pytestmark = pytest.mark.skip(reason="Manual integration diagnostic script; run directly if needed.")
 
 
 def check_netstat_bindings(expected_interface="0.0.0.0"):
